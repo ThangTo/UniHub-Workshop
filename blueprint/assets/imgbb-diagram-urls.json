@@ -1,0 +1,209 @@
+{
+  "c4-level-1-system-context.png": {
+    "file": "c4-level-1-system-context.png",
+    "url": "https://i.ibb.co/5x6Gshxy/c4-level-1-system-context.png",
+    "url_viewer": "https://ibb.co/HpVBGTps",
+    "width": 3920,
+    "height": 1520,
+    "size": 312751,
+    "uploaded_at": "2026-04-25T15:12:33.014Z"
+  },
+  "c4-level-2-container.png": {
+    "file": "c4-level-2-container.png",
+    "url": "https://i.ibb.co/zhdMQ76f/c4-level-2-container.png",
+    "url_viewer": "https://ibb.co/N6RvtmTY",
+    "width": 3920,
+    "height": 3320,
+    "size": 552950,
+    "uploaded_at": "2026-04-25T15:12:37.504Z"
+  },
+  "design-03-3-high-level-architecture-diagram.png": {
+    "file": "design-03-3-high-level-architecture-diagram.png",
+    "url": "https://i.ibb.co/bghsgF4p/design-03-3-high-level-architecture-diagram.png",
+    "url_viewer": "https://ibb.co/6RhHR8K6",
+    "width": 3920,
+    "height": 2945,
+    "size": 491273,
+    "uploaded_at": "2026-04-25T15:12:39.797Z"
+  },
+  "design-04-3-2-luong-check-in-offline-chi-tiet.png": {
+    "file": "design-04-3-2-luong-check-in-offline-chi-tiet.png",
+    "url": "https://i.ibb.co/qY4nZdph/design-04-3-2-luong-check-in-offline-chi-tiet.png",
+    "url_viewer": "https://ibb.co/k2rydxXz",
+    "width": 6005,
+    "height": 5730,
+    "size": 719284,
+    "uploaded_at": "2026-04-25T15:12:42.366Z"
+  },
+  "design-05-4-4-erd-tom-tat.png": {
+    "file": "design-05-4-4-erd-tom-tat.png",
+    "url": "https://i.ibb.co/39sS1FZk/design-05-4-4-erd-tom-tat.png",
+    "url_viewer": "https://ibb.co/YFWf2dsb",
+    "width": 9890,
+    "height": 4200,
+    "size": 610665,
+    "uploaded_at": "2026-04-25T15:12:44.895Z"
+  },
+  "design-06-5-1-luong-ang-ky-workshop-co-phi-paid-confirmed.png": {
+    "file": "design-06-5-1-luong-ang-ky-workshop-co-phi-paid-confirmed.png",
+    "url": "https://i.ibb.co/fzsTQRhY/design-06-5-1-luong-ang-ky-workshop-co-phi-paid-confirmed.png",
+    "url_viewer": "https://ibb.co/hJSTC5PR",
+    "width": 10370,
+    "height": 14405,
+    "size": 2381113,
+    "uploaded_at": "2026-04-25T15:12:51.140Z"
+  },
+  "design-07-5-3-luong-nhap-du-lieu-csv-em.png": {
+    "file": "design-07-5-3-luong-nhap-du-lieu-csv-em.png",
+    "url": "https://i.ibb.co/TBHRrt9X/design-07-5-3-luong-nhap-du-lieu-csv-em.png",
+    "url_viewer": "https://ibb.co/MDRp97FT",
+    "width": 5250,
+    "height": 7280,
+    "size": 725673,
+    "uploaded_at": "2026-04-25T15:12:53.379Z"
+  },
+  "design-08-7-2-xu-ly-cong-thanh-toan-khong-on-inh-circuit-breaker-graceful-degradation.png": {
+    "file": "design-08-7-2-xu-ly-cong-thanh-toan-khong-on-inh-circuit-breaker-graceful-degradation.png",
+    "url": "https://i.ibb.co/hJX6qfk7/design-08-7-2-xu-ly-cong-thanh-toan-khong-on-inh-circuit-breaker-graceful-degradation.png",
+    "url_viewer": "https://ibb.co/dwbThgSW",
+    "width": 2420,
+    "height": 2020,
+    "size": 204221,
+    "uploaded_at": "2026-04-25T15:12:54.397Z"
+  },
+  "design-09-7-3-chong-tru-tien-2-lan-idempotency-key.png": {
+    "file": "design-09-7-3-chong-tru-tien-2-lan-idempotency-key.png",
+    "url": "https://i.ibb.co/3Y1RtpZ9/design-09-7-3-chong-tru-tien-2-lan-idempotency-key.png",
+    "url_viewer": "https://ibb.co/2YqZXv41",
+    "width": 3920,
+    "height": 4980,
+    "size": 445061,
+    "uploaded_at": "2026-04-25T15:12:55.852Z"
+  },
+  "specs-ai-summary-01-luong-chinh.png": {
+    "file": "specs-ai-summary-01-luong-chinh.png",
+    "url": "https://i.ibb.co/236Knxvn/specs-ai-summary-01-luong-chinh.png",
+    "url_viewer": "https://ibb.co/whL60VS0",
+    "width": 8380,
+    "height": 8855,
+    "size": 1382200,
+    "uploaded_at": "2026-04-25T15:12:59.301Z"
+  },
+  "specs-auth-01-e-kiem-tra-quyen-tren-moi-request-backend.png": {
+    "file": "specs-auth-01-e-kiem-tra-quyen-tren-moi-request-backend.png",
+    "url": "https://i.ibb.co/mV8qX4CL/specs-auth-01-e-kiem-tra-quyen-tren-moi-request-backend.png",
+    "url_viewer": "https://ibb.co/zTJR7Zhy",
+    "width": 3920,
+    "height": 705,
+    "size": 103474,
+    "uploaded_at": "2026-04-25T15:13:00.243Z"
+  },
+  "specs-checkin-01-a-khi-co-mang-online.png": {
+    "file": "specs-checkin-01-a-khi-co-mang-online.png",
+    "url": "https://i.ibb.co/qLBRGB6q/specs-checkin-01-a-khi-co-mang-online.png",
+    "url_viewer": "https://ibb.co/9mnqXnPK",
+    "width": 6560,
+    "height": 5040,
+    "size": 575188,
+    "uploaded_at": "2026-04-25T15:13:02.083Z"
+  },
+  "specs-checkin-02-b-khi-mat-mang-offline.png": {
+    "file": "specs-checkin-02-b-khi-mat-mang-offline.png",
+    "url": "https://i.ibb.co/snGTm6W/specs-checkin-02-b-khi-mat-mang-offline.png",
+    "url_viewer": "https://ibb.co/vpGNwQX",
+    "width": 4510,
+    "height": 2775,
+    "size": 286500,
+    "uploaded_at": "2026-04-25T15:13:03.332Z"
+  },
+  "specs-checkin-03-c-ong-bo-khi-co-mang-tro-lai.png": {
+    "file": "specs-checkin-03-c-ong-bo-khi-co-mang-tro-lai.png",
+    "url": "https://i.ibb.co/k290jjq1/specs-checkin-03-c-ong-bo-khi-co-mang-tro-lai.png",
+    "url_viewer": "https://ibb.co/CKMvggV2",
+    "width": 4275,
+    "height": 3260,
+    "size": 349911,
+    "uploaded_at": "2026-04-25T15:13:04.613Z"
+  },
+  "specs-circuit-breaker-01-a-mo-hinh-3-trang-thai.png": {
+    "file": "specs-circuit-breaker-01-a-mo-hinh-3-trang-thai.png",
+    "url": "https://i.ibb.co/vxkSTRHZ/specs-circuit-breaker-01-a-mo-hinh-3-trang-thai.png",
+    "url_viewer": "https://ibb.co/ccQjZV1D",
+    "width": 2420,
+    "height": 2140,
+    "size": 217311,
+    "uploaded_at": "2026-04-25T15:13:05.731Z"
+  },
+  "specs-circuit-breaker-02-d-graceful-degradation-co-lap-payment-khoi-phan-con-lai.png": {
+    "file": "specs-circuit-breaker-02-d-graceful-degradation-co-lap-payment-khoi-phan-con-lai.png",
+    "url": "https://i.ibb.co/HDGNR5wG/specs-circuit-breaker-02-d-graceful-degradation-co-lap-payment-khoi-phan-con-lai.png",
+    "url_viewer": "https://ibb.co/fYr8Zj6r",
+    "width": 3920,
+    "height": 1735,
+    "size": 165032,
+    "uploaded_at": "2026-04-25T15:13:06.814Z"
+  },
+  "specs-csv-sync-01-luong-chinh.png": {
+    "file": "specs-csv-sync-01-luong-chinh.png",
+    "url": "https://i.ibb.co/tPxTZ2tb/specs-csv-sync-01-luong-chinh.png",
+    "url_viewer": "https://ibb.co/R4Bkh6mC",
+    "width": 6250,
+    "height": 8060,
+    "size": 1027621,
+    "uploaded_at": "2026-04-25T15:13:09.290Z"
+  },
+  "specs-idempotency-01-d-cach-kiem-tra-trung-lap-decision-tree.png": {
+    "file": "specs-idempotency-01-d-cach-kiem-tra-trung-lap-decision-tree.png",
+    "url": "https://i.ibb.co/C3WbT4cf/specs-idempotency-01-d-cach-kiem-tra-trung-lap-decision-tree.png",
+    "url_viewer": "https://ibb.co/ksM4Wz7t",
+    "width": 3920,
+    "height": 4520,
+    "size": 459552,
+    "uploaded_at": "2026-04-25T15:13:10.717Z"
+  },
+  "specs-notification-01-kien-truc-strategy-adapter-pattern.png": {
+    "file": "specs-notification-01-kien-truc-strategy-adapter-pattern.png",
+    "url": "https://i.ibb.co/BKSf41Jt/specs-notification-01-kien-truc-strategy-adapter-pattern.png",
+    "url_viewer": "https://ibb.co/YTqNDrS3",
+    "width": 2680,
+    "height": 2590,
+    "size": 201981,
+    "uploaded_at": "2026-04-25T15:13:11.849Z"
+  },
+  "specs-notification-02-luong-chinh.png": {
+    "file": "specs-notification-02-luong-chinh.png",
+    "url": "https://i.ibb.co/fzK6WQsD/specs-notification-02-luong-chinh.png",
+    "url_viewer": "https://ibb.co/hJnQNCSY",
+    "width": 6370,
+    "height": 5770,
+    "size": 674071,
+    "uploaded_at": "2026-04-25T15:13:13.957Z"
+  },
+  "specs-payment-01-a-khoi-tao-thanh-toan.png": {
+    "file": "specs-payment-01-a-khoi-tao-thanh-toan.png",
+    "url": "https://i.ibb.co/21Ctyhmk/specs-payment-01-a-khoi-tao-thanh-toan.png",
+    "url_viewer": "https://ibb.co/LXct8RbZ",
+    "width": 8380,
+    "height": 11785,
+    "size": 1833583,
+    "uploaded_at": "2026-04-25T15:13:17.631Z"
+  },
+  "specs-registration-01-a-ang-ky-workshop-mien-phi.png": {
+    "file": "specs-registration-01-a-ang-ky-workshop-mien-phi.png",
+    "url": "https://i.ibb.co/Z694hMZz/specs-registration-01-a-ang-ky-workshop-mien-phi.png",
+    "url_viewer": "https://ibb.co/d0ZCQ5h4",
+    "width": 4365,
+    "height": 5060,
+    "size": 557358,
+    "uploaded_at": "2026-04-25T15:13:19.433Z"
+  },
+  "specs-registration-02-b-ang-ky-workshop-co-phi-giai-oan-giu-ghe.png": {
+    "file": "specs-registration-02-b-ang-ky-workshop-co-phi-giai-oan-giu-ghe.png",
+    "url": "https://i.ibb.co/xtTS6ttS/specs-registration-02-b-ang-ky-workshop-co-phi-giai-oan-giu-ghe.png",
+    "url_viewer": "https://ibb.co/Tx3BtxxB",
+    "width": 4365,
+    "height": 4800,
+    "size": 602428,
+    "uploaded_at": "2026-04-25T15:13:21.054Z"
+  }
+}
