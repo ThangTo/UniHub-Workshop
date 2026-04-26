@@ -1,0 +1,70 @@
+# dependencies
+node_modules
+.pnpm-store
+
+# build
+dist
+build
+.next
+out
+
+# env
+.env
+.env.local
+.env.*.local
+
+# logs
+*.log
+logs
+
+# editor
+.vscode/*
+!.vscode/extensions.json
+.idea
+
+# os
+.DS_Store
+Thumbs.db
+
+# test / coverage
+coverage
+*.lcov
+
+# prisma
+src/apps/backend/prisma/migrations/**/migration_lock.toml.bak
+
+# docker volumes (mounted as src/data/)
+src/data/postgres
+src/data/redis
+src/data/rabbitmq
+src/data/minio
+
+# csv worker drop dirs are tracked via .gitkeep
+src/data/csv-drop/*.csv
+src/data/csv-quarantine/*
+src/data/csv-archive/*
+!src/data/csv-drop/.gitkeep
+!src/data/csv-quarantine/.gitkeep
+!src/data/csv-archive/.gitkeep
+
+# Backups, dumps, swap files
+*.sql.bak
+*.dump
+*.swp
+*~
+
+# Build / cache
+.pnpm-debug.log*
+.nest/
+*.tsbuildinfo
+src/apps/backend/prisma/generated/
+
+# Temp / IDE
+.tmp/
+*.tmp
+.history/
+.aider*
+
+# OS
+ehthumbs.db
+desktop.ini

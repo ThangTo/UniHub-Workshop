@@ -1,0 +1,180 @@
+name: unihub-workshop
+
+# UniHub Workshop infrastructure & app stack.
+# - infra-only: `docker compose up -d postgres redis rabbitmq minio mailhog`
+# - full stack: `docker compose up -d --build`
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: unihub-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-unihub}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-unihub}
+      POSTGRES_DB: ${POSTGRES_DB:-unihub}
+    ports:
+      - '${POSTGRES_PORT:-5432}:5432'
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-unihub} -d ${POSTGRES_DB:-unihub}']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    container_name: unihub-redis
+    restart: unless-stopped
+    command: ['redis-server', '--appendonly', 'yes']
+    ports:
+      - '${REDIS_PORT:-6379}:6379'
+    volumes:
+      - ./data/redis:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    container_name: unihub-rabbitmq
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-unihub}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-unihub}
+    ports:
+      - '${RABBITMQ_PORT:-5672}:5672'
+      - '${RABBITMQ_MANAGEMENT_PORT:-15672}:15672'
+    volumes:
+      - ./data/rabbitmq:/var/lib/rabbitmq
+    healthcheck:
+      test: ['CMD', 'rabbitmq-diagnostics', '-q', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  minio:
+    image: minio/minio:latest
+    container_name: unihub-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-unihub}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-unihub-secret}
+    ports:
+      - '${MINIO_PORT:-9000}:9000'
+      - '${MINIO_CONSOLE_PORT:-9001}:9001'
+    volumes:
+      - ./data/minio:/data
+    healthcheck:
+      test: ['CMD', 'curl', '-f', 'http://localhost:9000/minio/health/ready']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  mailhog:
+    image: mailhog/mailhog:latest
+    container_name: unihub-mailhog
+    restart: unless-stopped
+    ports:
+      - '${MAILHOG_SMTP_PORT:-1025}:1025'
+      - '${MAILHOG_UI_PORT:-8025}:8025'
+
+  backend:
+    profiles: ['app', 'all']
+    build:
+      context: .
+      dockerfile: apps/backend/Dockerfile
+    container_name: unihub-backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      mailhog:
+        condition: service_started
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-unihub}:${POSTGRES_PASSWORD:-unihub}@postgres:5432/${POSTGRES_DB:-unihub}?schema=public
+      REDIS_URL: redis://redis:6379
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-unihub}:${RABBITMQ_PASSWORD:-unihub}@rabbitmq:5672
+      MINIO_ENDPOINT: minio
+      MINIO_PORT: '9000'
+      MINIO_USE_SSL: 'false'
+      SMTP_HOST: mailhog
+      SMTP_PORT: '1025'
+    ports:
+      - '${BACKEND_PORT:-3000}:3000'
+    volumes:
+      - ./data/keys:/app/data/keys
+      - ./data/csv-drop:/app/data/csv-drop
+      - ./data/csv-quarantine:/app/data/csv-quarantine
+      - ./data/csv-archive:/app/data/csv-archive
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:3000/health || exit 1']
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+  mock-pg:
+    profiles: ['app', 'mocks', 'all']
+    build:
+      context: .
+      dockerfile: services/mock-pg/Dockerfile
+    container_name: unihub-mock-pg
+    restart: unless-stopped
+    environment:
+      PORT: '4000'
+      WEBHOOK_URL: http://backend:3000/payments/webhook
+      WEBHOOK_SECRET: ${MOCK_PG_WEBHOOK_SECRET:-mock-pg-secret}
+    ports:
+      - '4000:4000'
+
+  mock-ai:
+    profiles: ['app', 'mocks', 'all']
+    build:
+      context: .
+      dockerfile: services/mock-ai/Dockerfile
+    container_name: unihub-mock-ai
+    restart: unless-stopped
+    environment:
+      PORT: '4100'
+    ports:
+      - '4100:4100'
+
+  student-web:
+    profiles: ['web', 'all']
+    build:
+      context: .
+      dockerfile: apps/student-web/Dockerfile
+      args:
+        VITE_API_BASE_URL: http://localhost:${BACKEND_PORT:-3000}
+    container_name: unihub-student-web
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - '${STUDENT_WEB_PORT:-5173}:80'
+
+  admin-web:
+    profiles: ['web', 'all']
+    build:
+      context: .
+      dockerfile: apps/admin-web/Dockerfile
+      args:
+        VITE_API_BASE_URL: http://localhost:${BACKEND_PORT:-3000}
+    container_name: unihub-admin-web
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - '${ADMIN_WEB_PORT:-5174}:80'

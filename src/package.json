@@ -1,0 +1,33 @@
+{
+  "name": "unihub-workshop",
+  "version": "1.0.0",
+  "private": true,
+  "description": "UniHub Workshop — Modular Monolith implementation (Part 2)",
+  "packageManager": "pnpm@9.7.0",
+  "engines": {
+    "node": ">=20.10.0",
+    "pnpm": ">=9"
+  },
+  "scripts": {
+    "dev": "pnpm --filter \"./apps/backend\" run dev",
+    "build": "pnpm -r run build",
+    "lint": "pnpm -r run lint",
+    "test": "pnpm -r run test",
+    "format": "prettier --write \"**/*.{ts,tsx,json,md}\"",
+    "infra:up": "docker compose up -d postgres redis rabbitmq minio mailhog",
+    "infra:down": "docker compose down -v",
+    "stack:up": "docker compose --profile all up -d --build",
+    "stack:down": "docker compose --profile all down -v",
+    "app:up": "docker compose --profile app up -d --build",
+    "web:up": "docker compose --profile web up -d --build",
+    "mocks:up": "docker compose --profile mocks up -d --build",
+    "db:migrate:dev": "pnpm --filter \"./apps/backend\" exec prisma migrate dev",
+    "db:migrate:deploy": "pnpm --filter \"./apps/backend\" exec prisma migrate deploy",
+    "db:generate": "pnpm --filter \"./apps/backend\" exec prisma generate",
+    "db:seed": "pnpm --filter \"./apps/backend\" run seed"
+  },
+  "devDependencies": {
+    "prettier": "^3.3.3",
+    "typescript": "^5.5.4"
+  }
+}

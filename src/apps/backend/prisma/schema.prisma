@@ -1,0 +1,468 @@
+// Prisma schema cho UniHub Workshop.
+// Phải đồng bộ chính xác với blueprint/design.md §4.2.
+// Mọi thay đổi schema phải đi kèm migration mới (`pnpm prisma migrate dev --name <change>`).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// =====================================================
+// 1. Users & RBAC
+// =====================================================
+
+model User {
+  id            String   @id @default(uuid()) @db.Uuid
+  email         String   @unique @db.VarChar(255)
+  passwordHash  String   @map("password_hash") @db.VarChar(255)
+  fullName      String   @map("full_name") @db.VarChar(255)
+  studentCode   String?  @unique @map("student_code") @db.VarChar(20)
+  phone         String?  @db.VarChar(20)
+  isActive      Boolean  @default(true) @map("is_active")
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  roles               UserRole[]
+  refreshTokens       RefreshToken[]
+  registrations       Registration[]
+  notifications       Notification[]
+  notificationPrefs   NotificationPreference?
+  staffAssignments    StaffRoomAssignment[]
+  checkins            Checkin[]            @relation("CheckinByStaff")
+  createdWorkshops    Workshop[]
+  auditLogs           AuditLog[]
+  idempotencyKeys     IdempotencyKey[]
+
+  @@map("users")
+}
+
+model Role {
+  id    Int        @id @default(autoincrement()) @db.SmallInt
+  name  String     @unique @db.VarChar(50) // STUDENT | ORGANIZER | CHECKIN_STAFF | SYS_ADMIN
+  users UserRole[]
+
+  @@map("roles")
+}
+
+model UserRole {
+  userId String @map("user_id") @db.Uuid
+  roleId Int    @map("role_id") @db.SmallInt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role Role @relation(fields: [roleId], references: [id], onDelete: Restrict)
+
+  @@id([userId, roleId])
+  @@map("user_roles")
+}
+
+model RefreshToken {
+  id         String    @id @default(uuid()) @db.Uuid
+  userId     String    @map("user_id") @db.Uuid
+  tokenHash  String    @unique @map("token_hash") @db.VarChar(128)
+  expiresAt  DateTime  @map("expires_at") @db.Timestamptz(6)
+  revokedAt  DateTime? @map("revoked_at") @db.Timestamptz(6)
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt(sort: Desc)], map: "idx_refresh_tokens_user")
+  @@map("refresh_tokens")
+}
+
+model Student {
+  studentCode      String    @id @map("student_code") @db.VarChar(20)
+  fullName         String    @map("full_name") @db.VarChar(255)
+  email            String?   @db.VarChar(255)
+  faculty          String?   @db.VarChar(100)
+  cohort           String?   @db.VarChar(10)
+  isActive         Boolean   @default(true) @map("is_active")
+  sourceExportedAt DateTime? @map("source_exported_at") @db.Timestamptz(6)
+  lastSyncedAt     DateTime  @default(now()) @map("last_synced_at") @db.Timestamptz(6)
+
+  @@map("students")
+}
+
+/// Bảng staging được TRUNCATE sau mỗi batch UPSERT, xem specs/csv-sync.md.
+model StudentStaging {
+  importJobId      String    @map("import_job_id") @db.Uuid
+  lineNo           Int       @map("line_no")
+  studentCode      String    @map("student_code") @db.VarChar(20)
+  fullName         String    @map("full_name") @db.VarChar(255)
+  email            String?   @db.VarChar(255)
+  faculty          String?   @db.VarChar(100)
+  cohort           String?   @db.VarChar(10)
+  isActive         Boolean   @map("is_active")
+  sourceExportedAt DateTime? @map("source_exported_at") @db.Timestamptz(6)
+
+  @@id([importJobId, lineNo])
+  @@map("students_staging")
+}
+
+// =====================================================
+// 2. Workshops
+// =====================================================
+
+model Room {
+  id        String  @id @default(uuid()) @db.Uuid
+  code      String  @unique @db.VarChar(20)
+  name      String  @db.VarChar(255)
+  capacity  Int
+  mapUrl    String? @map("map_url")
+
+  workshops        Workshop[]
+  staffAssignments StaffRoomAssignment[]
+
+  @@map("rooms")
+}
+
+model Speaker {
+  id        String  @id @default(uuid()) @db.Uuid
+  name      String  @db.VarChar(255)
+  title     String? @db.VarChar(255)
+  bio       String?
+  avatarUrl String? @map("avatar_url")
+
+  workshops Workshop[]
+
+  @@map("speakers")
+}
+
+enum WorkshopStatus {
+  DRAFT
+  PUBLISHED
+  CANCELLED
+  ENDED
+
+  @@map("workshop_status")
+}
+
+enum SummaryStatus {
+  NONE
+  PENDING
+  READY
+  FAILED
+
+  @@map("summary_status")
+}
+
+model Workshop {
+  id                String          @id @default(uuid()) @db.Uuid
+  title             String          @db.VarChar(255)
+  description       String?
+  speakerId         String?         @map("speaker_id") @db.Uuid
+  roomId            String?         @map("room_id") @db.Uuid
+  startAt           DateTime        @map("start_at") @db.Timestamptz(6)
+  endAt             DateTime        @map("end_at") @db.Timestamptz(6)
+  capacity          Int
+  feeAmount         Int             @default(0) @map("fee_amount") // VND, 0 = free
+  status            WorkshopStatus  @default(DRAFT)
+  pdfObjectKey      String?         @map("pdf_object_key")
+  /// KHÔNG UNIQUE — nhiều workshop có thể dùng chung 1 PDF (dùng ai_summary_cache).
+  pdfSha256         String?         @map("pdf_sha256") @db.VarChar(64)
+  summary           String?
+  summaryHighlights Json?           @map("summary_highlights")
+  summaryStatus     SummaryStatus   @default(NONE) @map("summary_status")
+  createdBy         String?         @map("created_by") @db.Uuid
+  createdAt         DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime        @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  /// Optimistic lock token, increment ở mỗi UPDATE.
+  version           Int             @default(0)
+
+  speaker          Speaker?              @relation(fields: [speakerId], references: [id])
+  room             Room?                 @relation(fields: [roomId], references: [id])
+  creator          User?                 @relation(fields: [createdBy], references: [id])
+  registrations    Registration[]
+  staffAssignments StaffRoomAssignment[]
+
+  @@index([status, startAt], map: "idx_workshops_status_start")
+  @@index([roomId, startAt, endAt], map: "idx_workshops_room_time")
+  @@map("workshops")
+}
+
+/// Cache summary theo SHA-256 PDF, dùng chung cho nhiều workshop.
+model AiSummaryCache {
+  pdfSha256         String   @id @map("pdf_sha256") @db.VarChar(64)
+  summary           String
+  summaryHighlights Json?    @map("summary_highlights")
+  model             String?  @db.VarChar(100)
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@map("ai_summary_cache")
+}
+
+// =====================================================
+// 3. Registrations
+// =====================================================
+
+enum RegistrationStatus {
+  PENDING_PAYMENT
+  CONFIRMED
+  CANCELLED
+  EXPIRED
+
+  @@map("registration_status")
+}
+
+model Registration {
+  id             String              @id @default(uuid()) @db.Uuid
+  workshopId     String              @map("workshop_id") @db.Uuid
+  studentId      String              @map("student_id") @db.Uuid
+  status         RegistrationStatus
+  qrToken        String?             @unique @map("qr_token") @db.VarChar(512)
+  feeAmount      Int                 @map("fee_amount")
+  holdExpiresAt  DateTime?           @map("hold_expires_at") @db.Timestamptz(6)
+  createdAt      DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  confirmedAt    DateTime?           @map("confirmed_at") @db.Timestamptz(6)
+  cancelledAt    DateTime?           @map("cancelled_at") @db.Timestamptz(6)
+
+  workshop Workshop @relation(fields: [workshopId], references: [id])
+  student  User     @relation(fields: [studentId], references: [id])
+  payments Payment[]
+  checkin  Checkin?
+
+  /// 1 SV chỉ được đăng ký 1 lần / workshop.
+  @@unique([workshopId, studentId])
+  @@index([workshopId, status], map: "idx_registrations_workshop_status")
+  @@index([studentId, createdAt(sort: Desc)], map: "idx_registrations_student")
+  @@map("registrations")
+}
+
+// =====================================================
+// 4. Payments
+// =====================================================
+
+enum PaymentStatus {
+  INITIATED
+  PENDING
+  SUCCESS
+  FAILED
+  TIMEOUT
+  REFUNDED
+
+  @@map("payment_status")
+}
+
+model Payment {
+  id                String        @id @default(uuid()) @db.Uuid
+  registrationId    String        @map("registration_id") @db.Uuid
+  attemptNo         Int           @default(1) @map("attempt_no")
+  amount            Int
+  currency          String        @default("VND") @db.Char(3)
+  gateway           String        @db.VarChar(50)
+  gatewayTxnId      String?       @unique @map("gateway_txn_id") @db.VarChar(100)
+  status            PaymentStatus
+  /// Idempotency-Key client gửi (header), unique vĩnh viễn để chống duplicate charge.
+  idempotencyKey    String        @unique @map("idempotency_key") @db.VarChar(100)
+  requestHash       String        @map("request_hash") @db.VarChar(64)
+  responseSnapshot  Json?         @map("response_snapshot")
+  failureReason     String?       @map("failure_reason")
+  createdAt         DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime      @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  registration Registration    @relation(fields: [registrationId], references: [id])
+  refunds      PaymentRefund[]
+
+  @@unique([registrationId, attemptNo])
+  @@index([status, createdAt], map: "idx_payments_status")
+  @@map("payments")
+  // Partial unique "uq_one_success_payment_per_registration" tạo ở migration SQL,
+  // Prisma không hỗ trợ partial index trực tiếp.
+}
+
+enum RefundStatus {
+  REQUESTED
+  PENDING
+  SUCCESS
+  FAILED
+
+  @@map("refund_status")
+}
+
+model PaymentRefund {
+  id              String       @id @default(uuid()) @db.Uuid
+  paymentId       String       @map("payment_id") @db.Uuid
+  amount          Int
+  reason          String?
+  status          RefundStatus @default(REQUESTED)
+  gatewayRefundId String?      @unique @map("gateway_refund_id") @db.VarChar(100)
+  createdAt       DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  payment Payment @relation(fields: [paymentId], references: [id])
+
+  @@map("payment_refunds")
+}
+
+// =====================================================
+// 5. Check-ins
+// =====================================================
+
+model Checkin {
+  id             String   @id @default(uuid()) @db.Uuid
+  registrationId String   @unique @map("registration_id") @db.Uuid
+  scannedAt      DateTime @map("scanned_at") @db.Timestamptz(6)
+  syncedAt       DateTime @default(now()) @map("synced_at") @db.Timestamptz(6)
+  deviceId       String   @map("device_id") @db.VarChar(64)
+  staffId        String   @map("staff_id") @db.Uuid
+  /// idempotencyKey = sha256(regId + deviceId + scannedAtMs).
+  idempotencyKey String   @unique @map("idempotency_key") @db.VarChar(64)
+
+  registration Registration @relation(fields: [registrationId], references: [id])
+  staff        User         @relation("CheckinByStaff", fields: [staffId], references: [id])
+
+  @@map("checkins")
+}
+
+model StaffRoomAssignment {
+  staffId    String   @map("staff_id") @db.Uuid
+  workshopId String   @map("workshop_id") @db.Uuid
+  roomId     String   @map("room_id") @db.Uuid
+  startsAt   DateTime @map("starts_at") @db.Timestamptz(6)
+  endsAt     DateTime @map("ends_at") @db.Timestamptz(6)
+
+  staff    User     @relation(fields: [staffId], references: [id])
+  workshop Workshop @relation(fields: [workshopId], references: [id])
+  room     Room     @relation(fields: [roomId], references: [id])
+
+  @@id([staffId, workshopId])
+  @@map("staff_room_assignments")
+}
+
+// =====================================================
+// 6. Notifications
+// =====================================================
+
+enum NotificationChannel {
+  EMAIL
+  IN_APP
+  TELEGRAM
+
+  @@map("notification_channel")
+}
+
+enum NotificationStatus {
+  QUEUED
+  SENT
+  FAILED
+  READ
+
+  @@map("notification_status")
+}
+
+model Notification {
+  id         String              @id @default(uuid()) @db.Uuid
+  eventId    String              @map("event_id") @db.Uuid
+  userId     String              @map("user_id") @db.Uuid
+  channel    NotificationChannel
+  template   String              @db.VarChar(50)
+  payload    Json
+  status     NotificationStatus  @default(QUEUED)
+  attempts   Int                 @default(0)
+  lastError  String?             @map("last_error")
+  createdAt  DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  sentAt     DateTime?           @map("sent_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id])
+
+  /// Idempotency theo (user, template, channel, event) — chống dispatcher gửi trùng.
+  @@unique([userId, template, channel, eventId])
+  @@index([userId, status], map: "idx_notifications_user_status")
+  @@map("notifications")
+}
+
+model NotificationPreference {
+  userId      String   @id @map("user_id") @db.Uuid
+  preferences Json
+  updatedAt   DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("notification_preferences")
+}
+
+// =====================================================
+// 7. CSV Import Jobs (audit)
+// =====================================================
+
+enum ImportJobStatus {
+  RUNNING
+  SUCCESS
+  PARTIAL
+  FAILED
+
+  @@map("import_job_status")
+}
+
+model ImportJob {
+  id               String           @id @default(uuid()) @db.Uuid
+  fileName         String           @map("file_name") @db.VarChar(255)
+  fileSha256       String           @unique @map("file_sha256") @db.VarChar(64)
+  sourceExportedAt DateTime?        @map("source_exported_at") @db.Timestamptz(6)
+  totalRows        Int?             @map("total_rows")
+  insertedRows     Int?             @map("inserted_rows")
+  updatedRows      Int?             @map("updated_rows")
+  failedRows       Int?             @map("failed_rows")
+  status           ImportJobStatus
+  startedAt        DateTime         @default(now()) @map("started_at") @db.Timestamptz(6)
+  finishedAt       DateTime?        @map("finished_at") @db.Timestamptz(6)
+  errorLog         Json?            @map("error_log")
+
+  @@map("import_jobs")
+}
+
+// =====================================================
+// 8. Outbox + Idempotency + Audit
+// =====================================================
+
+model OutboxEvent {
+  id          String    @id @default(uuid()) @db.Uuid
+  aggregate   String    @db.VarChar(50)
+  aggregateId String    @map("aggregate_id") @db.Uuid
+  eventType   String    @map("event_type") @db.VarChar(100)
+  payload     Json
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  publishedAt DateTime? @map("published_at") @db.Timestamptz(6)
+
+  @@index([createdAt], map: "idx_outbox_unpublished")
+  @@map("outbox_events")
+}
+
+/// Generic idempotency store (durable). Mỗi (key, endpoint) là một entry.
+/// Ngoài ra, payments.idempotencyKey vẫn UNIQUE riêng để chống duplicate charge dài hạn.
+model IdempotencyKey {
+  key          String   @db.VarChar(128)
+  userId       String?  @map("user_id") @db.Uuid
+  endpoint     String   @db.VarChar(100)
+  requestHash  String   @map("request_hash") @db.VarChar(64)
+  statusCode   Int?     @map("status_code")
+  responseBody Json?    @map("response_body")
+  completed    Boolean  @default(false)
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  expiresAt    DateTime @map("expires_at") @db.Timestamptz(6)
+
+  user User? @relation(fields: [userId], references: [id])
+
+  @@id([key, endpoint])
+  @@index([expiresAt], map: "idx_idempotency_expiry")
+  @@map("idempotency_keys")
+}
+
+model AuditLog {
+  id         String   @id @default(uuid()) @db.Uuid
+  actorId    String?  @map("actor_id") @db.Uuid
+  action     String   @db.VarChar(100)
+  resource   String?  @db.VarChar(100)
+  resourceId String?  @map("resource_id") @db.Uuid
+  metadata   Json?
+  ipAddress  String?  @map("ip_address") @db.Inet
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  actor User? @relation(fields: [actorId], references: [id])
+
+  @@index([actorId, createdAt(sort: Desc)], map: "idx_audit_logs_actor_time")
+  @@map("audit_logs")
+}
