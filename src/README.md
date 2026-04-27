@@ -106,12 +106,30 @@ pnpm format
 ## Trạng thái triển khai
 
 - [x] **Phase 0** — Foundation (monorepo + docker-compose + Prisma schema)
-- [ ] **Phase 1** — Auth + RBAC + Rate Limit + Idempotency + Outbox + Catalog
-- [ ] **Phase 2** — Registration (Lua allocate/release + FCFS queue 202)
-- [ ] **Phase 3** — Payment + Circuit Breaker + Mock PG
-- [ ] **Phase 4** — Notification worker (email + in-app SSE)
-- [ ] **Phase 5** — AI summary pipeline
-- [ ] **Phase 6** — CSV sync cron
-- [ ] **Phase 7** — Check-in API + Expo mobile
-- [ ] **Phase 8** — Student web + Admin web
-- [ ] **Phase 9** — Seed + demo scripts (k6, race condition, idempotency)
+- [x] **Phase 1** — Auth + RBAC + Rate Limit + Idempotency + Outbox + Catalog
+- [x] **Phase 2** — Registration (Lua allocate/release + FCFS queue 202) + Payment + Circuit Breaker + Mock PG
+- [x] **Phase 3** — Check-in API (offline-aware idempotent) + Notification adapter
+- [x] **Phase 4** — AI summary pipeline (PDF → MinIO → pdfjs → Mock AI → cache theo SHA-256)
+- [ ] **Phase 5** — CSV sync cron (mssv import + atomic move + quarantine)
+- [ ] **Phase 6** — Expo mobile (offline SQLite check-in)
+- [ ] **Phase 7** — Student web + Admin web (Vite/React UI)
+- [ ] **Phase 8** — Demo scripts (k6 load, race-condition, idempotency)
+
+## Smoke test Phase 4 (AI Summary)
+
+```powershell
+# 1. Sinh PDF mẫu (~245 từ tiếng Anh)
+node scripts/make-test-pdf.js
+
+# 2. Đảm bảo infra + mock-ai + backend đang chạy:
+#    pnpm infra:up
+#    pnpm --filter ./services/mock-ai dev      # PORT=4100 (mặc định)
+#    pnpm --filter ./apps/backend dev          # PORT=3000
+
+# 3. Chạy smoke test (login organizer → upload PDF → poll READY → cache hit)
+powershell -ExecutionPolicy Bypass -File scripts/smoke-ai-summary.ps1
+```
+
+Toggle thử AI down: chạy mock-ai với `MOCK_AI_DOWN=true` → backend retry 4 lần
+(10s/30s/90s) rồi mark `FAILED`. Bật lại mock-ai bình thường + gọi
+`POST /workshops/{id}/summary/retry` để khôi phục.

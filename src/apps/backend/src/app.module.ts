@@ -4,6 +4,7 @@ import { ScheduleModule } from '@nestjs/schedule';
 import { PrismaModule } from './infra/prisma/prisma.module';
 import { RedisModule } from './infra/redis/redis.module';
 import { AmqpModule } from './infra/amqp/amqp.module';
+import { MinioModule } from './infra/minio/minio.module';
 import { AppConfigModule } from './common/config/app-config.module';
 import { HealthModule } from './health/health.module';
 import { AuditModule } from './modules/audit/audit.module';
@@ -15,6 +16,7 @@ import { RegistrationModule } from './modules/registration/registration.module';
 import { PaymentModule } from './modules/payment/payment.module';
 import { NotificationModule } from './modules/notification/notification.module';
 import { CheckinModule } from './modules/checkin/checkin.module';
+import { AiSummaryModule } from './modules/ai-summary/ai-summary.module';
 import { IdempotencyInterceptor } from './common/interceptors/idempotency.interceptor';
 
 @Module({
@@ -29,6 +31,7 @@ import { IdempotencyInterceptor } from './common/interceptors/idempotency.interc
     PrismaModule,
     RedisModule,
     AmqpModule,
+    MinioModule,
     AppConfigModule,
     // Cross-cutting
     AuditModule,
@@ -42,6 +45,7 @@ import { IdempotencyInterceptor } from './common/interceptors/idempotency.interc
     PaymentModule,
     NotificationModule,
     CheckinModule,
+    AiSummaryModule,
     // Health check
     HealthModule,
   ],
