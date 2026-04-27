@@ -74,6 +74,10 @@ export class JwksService implements OnModuleInit {
     return this.publicKey;
   }
 
+  issuer(): string {
+    return this.cfg.auth.issuer;
+  }
+
   /**
    * Generic helper để các service khác (QrTokenService, ...) ký RS256 mà không cần
    * reach vào private field.

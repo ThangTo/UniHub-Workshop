@@ -1,15 +1,7 @@
-import {
-  Body,
-  Controller,
-  Get,
-  HttpCode,
-  HttpStatus,
-  Post,
-  Req,
-  UseGuards,
-} from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, HttpStatus, Post, Req, UseGuards } from '@nestjs/common';
 import { Request } from 'express';
 import { AuthService } from './auth.service';
+import { JwksService } from './jwks.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { RefreshDto } from './dto/refresh.dto';
@@ -29,17 +21,46 @@ import { AuthenticatedUser } from '../../common/types/auth.types';
  */
 @Controller('auth')
 export class AuthController {
-  constructor(private readonly authService: AuthService) {}
+  constructor(
+    private readonly authService: AuthService,
+    private readonly jwks: JwksService,
+  ) {}
+
+  /**
+   * Mobile cache public key này để verify QR token offline (specs/checkin.md §E).
+   * Public — không cần auth.
+   */
+  @Public()
+  @Get('jwks')
+  jwksPublic() {
+    return {
+      alg: 'RS256',
+      issuer: this.jwks.issuer(),
+      publicKey: this.jwks.getPublicKey(),
+    };
+  }
 
   @Public()
-  @RateLimit({ scope: 'ip', bucket: 'auth-register', capacity: 3, refillPerSec: 3 / 3600, failClosed: true })
+  @RateLimit({
+    scope: 'ip',
+    bucket: 'auth-register',
+    capacity: 3,
+    refillPerSec: 3 / 3600,
+    failClosed: true,
+  })
   @Post('register')
   async register(@Body() dto: RegisterDto, @Req() req: Request) {
     return this.authService.register(dto, req.ip);
   }
 
   @Public()
-  @RateLimit({ scope: 'ip', bucket: 'auth-login', capacity: 10, refillPerSec: 1 / 60, failClosed: true })
+  @RateLimit({
+    scope: 'ip',
+    bucket: 'auth-login',
+    capacity: 10,
+    refillPerSec: 1 / 60,
+    failClosed: true,
+  })
   @Post('login')
   @HttpCode(HttpStatus.OK)
   async login(@Body() dto: LoginDto, @Req() req: Request) {

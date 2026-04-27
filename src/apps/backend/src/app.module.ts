@@ -14,6 +14,7 @@ import { CatalogModule } from './modules/catalog/catalog.module';
 import { RegistrationModule } from './modules/registration/registration.module';
 import { PaymentModule } from './modules/payment/payment.module';
 import { NotificationModule } from './modules/notification/notification.module';
+import { CheckinModule } from './modules/checkin/checkin.module';
 import { IdempotencyInterceptor } from './common/interceptors/idempotency.interceptor';
 
 @Module({
@@ -40,6 +41,7 @@ import { IdempotencyInterceptor } from './common/interceptors/idempotency.interc
     RegistrationModule,
     PaymentModule,
     NotificationModule,
+    CheckinModule,
     // Health check
     HealthModule,
   ],

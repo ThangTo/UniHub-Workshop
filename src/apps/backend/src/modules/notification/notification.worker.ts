@@ -20,6 +20,7 @@ const ROUTING_KEYS = [
   'payment.succeeded',
   'payment.failed',
   'workshop.cancelled',
+  'checkin.confirmed',
 ];
 
 /**
@@ -161,6 +162,30 @@ export class NotificationWorker implements OnModuleInit {
           userId: studentId,
           templateId: 'registration_cancelled',
           vars: { userName: user.fullName, workshopTitle: reg.workshop.title, refundRequired },
+        });
+        return;
+      }
+      case 'checkin.confirmed': {
+        const { regId, studentId, scannedAt } = evt.payload as {
+          regId: string;
+          studentId: string;
+          scannedAt: string;
+        };
+        const reg = await this.prisma.registration.findUnique({
+          where: { id: regId },
+          include: { workshop: true },
+        });
+        const user = await this.prisma.user.findUnique({ where: { id: studentId } });
+        if (!reg || !user) return;
+        await this.notif.dispatch({
+          eventId: evt.id,
+          userId: studentId,
+          templateId: 'checkin_succeeded',
+          vars: {
+            userName: user.fullName,
+            workshopTitle: reg.workshop.title,
+            scannedAt: new Date(scannedAt).toLocaleString('vi-VN'),
+          },
         });
         return;
       }

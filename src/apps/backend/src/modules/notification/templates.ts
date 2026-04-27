@@ -54,6 +54,15 @@ const RAW_TEMPLATES: Record<string, TemplateDef> = {
       '<p>Bạn có thể đăng ký lại nếu còn ghế.</p>',
     defaultChannels: ['IN_APP'],
   },
+  checkin_succeeded: {
+    subject: '🎫 Bạn đã check-in workshop "{{workshopTitle}}"',
+    text: 'Chào {{userName}},\n\nBạn vừa check-in thành công workshop "{{workshopTitle}}" lúc {{scannedAt}}. Chúc bạn có buổi học hữu ích!',
+    html:
+      '<p>Chào <b>{{userName}}</b>,</p>' +
+      '<p>Bạn vừa check-in thành công workshop <b>"{{workshopTitle}}"</b> lúc <b>{{scannedAt}}</b>.</p>' +
+      '<p>Chúc bạn có buổi học hữu ích!</p>',
+    defaultChannels: ['IN_APP'],
+  },
   registration_cancelled: {
     subject: '❌ Bạn đã huỷ đăng ký workshop "{{workshopTitle}}"',
     text: 'Chào {{userName}},\n\nBạn vừa huỷ đăng ký workshop "{{workshopTitle}}". {{#if refundRequired}}Hệ thống sẽ tự hoàn tiền trong 1-3 ngày làm việc.{{/if}}',
@@ -67,7 +76,12 @@ const RAW_TEMPLATES: Record<string, TemplateDef> = {
 
 const COMPILED = new Map<
   string,
-  { subject: HandlebarsTemplateDelegate; text: HandlebarsTemplateDelegate; html: HandlebarsTemplateDelegate; defaults: NotificationChannel[] }
+  {
+    subject: HandlebarsTemplateDelegate;
+    text: HandlebarsTemplateDelegate;
+    html: HandlebarsTemplateDelegate;
+    defaults: NotificationChannel[];
+  }
 >();
 
 for (const [k, v] of Object.entries(RAW_TEMPLATES)) {
@@ -79,7 +93,10 @@ for (const [k, v] of Object.entries(RAW_TEMPLATES)) {
   });
 }
 
-export function renderTemplate(templateId: string, vars: Record<string, unknown>): RenderedTemplate {
+export function renderTemplate(
+  templateId: string,
+  vars: Record<string, unknown>,
+): RenderedTemplate {
   const t = COMPILED.get(templateId);
   if (!t) throw new Error(`unknown_template: ${templateId}`);
   return {
