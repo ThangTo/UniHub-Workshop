@@ -73,4 +73,24 @@ export class JwksService implements OnModuleInit {
   getPublicKey(): string {
     return this.publicKey;
   }
+
+  /**
+   * Generic helper để các service khác (QrTokenService, ...) ký RS256 mà không cần
+   * reach vào private field.
+   */
+  signRs256(payload: object, opts: jwt.SignOptions = {}): string {
+    return jwt.sign(payload, this.privateKey, {
+      algorithm: 'RS256',
+      issuer: this.cfg.auth.issuer,
+      ...opts,
+    } as jwt.SignOptions);
+  }
+
+  verifyRs256<T extends object = jwt.JwtPayload>(token: string, opts: jwt.VerifyOptions = {}): T {
+    return jwt.verify(token, this.publicKey, {
+      algorithms: ['RS256'],
+      issuer: this.cfg.auth.issuer,
+      ...opts,
+    } as jwt.VerifyOptions) as T;
+  }
 }

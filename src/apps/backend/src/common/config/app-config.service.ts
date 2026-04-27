@@ -103,6 +103,27 @@ export class AppConfigService {
     };
   }
 
+  // --- Payment ---
+  get payment(): {
+    gatewayUrl: string;
+    webhookSecret: string;
+    timeoutMs: number;
+    cbErrorThreshold: number;
+    cbResetTimeoutMs: number;
+    cbVolumeThreshold: number;
+    cbRollingWindowMs: number;
+  } {
+    return {
+      gatewayUrl: this.raw.get<string>('MOCK_PG_URL', 'http://localhost:4000'),
+      webhookSecret: this.raw.get<string>('MOCK_PG_WEBHOOK_SECRET', 'mock-pg-secret'),
+      timeoutMs: Number(this.raw.get<string>('PAYMENT_TIMEOUT_MS', '3000')),
+      cbErrorThreshold: Number(this.raw.get<string>('PAYMENT_CB_ERROR_THRESHOLD', '50')),
+      cbResetTimeoutMs: Number(this.raw.get<string>('PAYMENT_CB_RESET_MS', '30000')),
+      cbVolumeThreshold: Number(this.raw.get<string>('PAYMENT_CB_VOLUME_THRESHOLD', '20')),
+      cbRollingWindowMs: Number(this.raw.get<string>('PAYMENT_CB_ROLLING_MS', '10000')),
+    };
+  }
+
   // --- Rate limit ---
   get rateLimit(): { globalRegistrationRps: number; regQueueTtlSec: number } {
     return {

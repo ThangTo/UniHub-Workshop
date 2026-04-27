@@ -212,7 +212,7 @@ model Registration {
   workshopId     String              @map("workshop_id") @db.Uuid
   studentId      String              @map("student_id") @db.Uuid
   status         RegistrationStatus
-  qrToken        String?             @unique @map("qr_token") @db.VarChar(512)
+  qrToken        String?             @unique @map("qr_token") @db.VarChar(2048)
   feeAmount      Int                 @map("fee_amount")
   holdExpiresAt  DateTime?           @map("hold_expires_at") @db.Timestamptz(6)
   createdAt      DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)

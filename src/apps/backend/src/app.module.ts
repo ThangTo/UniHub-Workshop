@@ -11,6 +11,9 @@ import { OutboxModule } from './modules/outbox/outbox.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { UsersModule } from './modules/users/users.module';
 import { CatalogModule } from './modules/catalog/catalog.module';
+import { RegistrationModule } from './modules/registration/registration.module';
+import { PaymentModule } from './modules/payment/payment.module';
+import { NotificationModule } from './modules/notification/notification.module';
 import { IdempotencyInterceptor } from './common/interceptors/idempotency.interceptor';
 
 @Module({
@@ -34,6 +37,9 @@ import { IdempotencyInterceptor } from './common/interceptors/idempotency.interc
     // Domain modules
     UsersModule,
     CatalogModule,
+    RegistrationModule,
+    PaymentModule,
+    NotificationModule,
     // Health check
     HealthModule,
   ],
