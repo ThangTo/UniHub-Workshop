@@ -17,6 +17,7 @@ import { PaymentModule } from './modules/payment/payment.module';
 import { NotificationModule } from './modules/notification/notification.module';
 import { CheckinModule } from './modules/checkin/checkin.module';
 import { AiSummaryModule } from './modules/ai-summary/ai-summary.module';
+import { CsvSyncModule } from './modules/csv-sync/csv-sync.module';
 import { IdempotencyInterceptor } from './common/interceptors/idempotency.interceptor';
 
 @Module({
@@ -46,6 +47,7 @@ import { IdempotencyInterceptor } from './common/interceptors/idempotency.interc
     NotificationModule,
     CheckinModule,
     AiSummaryModule,
+    CsvSyncModule,
     // Health check
     HealthModule,
   ],

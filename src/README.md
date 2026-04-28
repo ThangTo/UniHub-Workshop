@@ -110,7 +110,7 @@ pnpm format
 - [x] **Phase 2** — Registration (Lua allocate/release + FCFS queue 202) + Payment + Circuit Breaker + Mock PG
 - [x] **Phase 3** — Check-in API (offline-aware idempotent) + Notification adapter
 - [x] **Phase 4** — AI summary pipeline (PDF → MinIO → pdfjs → Mock AI → cache theo SHA-256)
-- [ ] **Phase 5** — CSV sync cron (mssv import + atomic move + quarantine)
+- [x] **Phase 5** — CSV sync cron (mssv import + atomic move + quarantine + advisory lock)
 - [ ] **Phase 6** — Expo mobile (offline SQLite check-in)
 - [ ] **Phase 7** — Student web + Admin web (Vite/React UI)
 - [ ] **Phase 8** — Demo scripts (k6 load, race-condition, idempotency)
@@ -133,3 +133,31 @@ powershell -ExecutionPolicy Bypass -File scripts/smoke-ai-summary.ps1
 Toggle thử AI down: chạy mock-ai với `MOCK_AI_DOWN=true` → backend retry 4 lần
 (10s/30s/90s) rồi mark `FAILED`. Bật lại mock-ai bình thường + gọi
 `POST /workshops/{id}/summary/retry` để khôi phục.
+
+## Smoke test Phase 5 (CSV sync)
+
+```powershell
+# Đảm bảo backend dev :3000 đang chạy (cần SYS_ADMIN admin@unihub.local).
+# Cron mặc định 02:00 hằng ngày — endpoint admin trigger thủ công bất cứ lúc nào.
+powershell -ExecutionPolicy Bypass -File scripts/smoke-csv-sync.ps1
+```
+
+Test bao gồm: 100 dòng valid → `SUCCESS`; re-drop cùng SHA → skip (UNIQUE
+`import_jobs.file_sha256`); header sai → `FAILED` + file vào
+`csv-quarantine/`; 5 % dòng lỗi → `PARTIAL` với `errorLog.failedRows`.
+
+Sinh CSV thủ công:
+
+```bash
+node scripts/make-test-csv.js --rows=10000             # 10K dòng đẹp
+node scripts/make-test-csv.js --rows=200 --partial     # 5% dòng sai email
+node scripts/make-test-csv.js --bad-header             # header không khớp
+```
+
+Folder mặc định (override qua env `CSV_DROP_DIR/CSV_QUARANTINE_DIR/CSV_ARCHIVE_DIR`):
+
+| Vai trò    | Path mặc định                       |
+| ---------- | ----------------------------------- |
+| Drop       | `apps/backend/data/csv-drop/`       |
+| Archive    | `apps/backend/data/csv-archive/`    |
+| Quarantine | `apps/backend/data/csv-quarantine/` |
