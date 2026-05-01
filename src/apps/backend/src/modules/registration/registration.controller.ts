@@ -7,6 +7,7 @@ import {
   Param,
   ParseUUIDPipe,
   Post,
+  Query,
   Sse,
 } from '@nestjs/common';
 import { Observable, interval, map, switchMap } from 'rxjs';
@@ -43,6 +44,7 @@ export class RegistrationController {
     const result = await this.svc.create(user.id, dto.workshopId);
     return {
       regId: result.registration.id,
+      registrationId: result.registration.id,
       status: result.registration.status,
       paymentRequired: result.paymentRequired,
       holdExpiresAt: result.holdExpiresAt,
@@ -70,6 +72,28 @@ export class RegistrationController {
   @Get('registrations/:id')
   async getOne(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: AuthenticatedUser) {
     return this.svc.getById(id, user.id);
+  }
+
+  @Roles('ORGANIZER', 'SYS_ADMIN')
+  @Get('admin/registrations')
+  async listAdmin(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query('workshopId') workshopId?: string,
+    @Query('status') status?: string,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+  ) {
+    const normalizedStatus =
+      status && ['PENDING_PAYMENT', 'CONFIRMED', 'CANCELLED', 'EXPIRED'].includes(status)
+        ? (status as 'PENDING_PAYMENT' | 'CONFIRMED' | 'CANCELLED' | 'EXPIRED')
+        : undefined;
+
+    return this.svc.listAdmin(user, {
+      workshopId,
+      status: normalizedStatus,
+      limit: limit ? parseInt(limit, 10) : undefined,
+      offset: offset ? parseInt(offset, 10) : undefined,
+    });
   }
 
   /**

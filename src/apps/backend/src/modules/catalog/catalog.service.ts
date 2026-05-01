@@ -62,12 +62,7 @@ export class CatalogService {
     ]);
 
     // Ghép seatsLeft từ Redis
-    const items = await Promise.all(
-      workshops.map(async (w) => {
-        const seatsLeft = await this.getSeatsLeft(w.id, w.capacity);
-        return { ...w, seatsLeft };
-      }),
-    );
+    const items = await Promise.all(workshops.map((w) => this.toWorkshopResponse(w)));
 
     const result = { items, total, page, limit, totalPages: Math.ceil(total / limit) };
     await this.safeRedisSet(cacheKey, JSON.stringify(result), CACHE_TTL);
@@ -85,10 +80,32 @@ export class CatalogService {
     });
     if (!w) throw new NotFoundException('workshop_not_found');
 
-    const seatsLeft = await this.getSeatsLeft(w.id, w.capacity);
-    const result = { ...w, seatsLeft };
+    const result = await this.toWorkshopResponse(w);
     await this.safeRedisSet(cacheKey, JSON.stringify(result), CACHE_TTL);
     return result;
+  }
+
+  async adminList(filters: { page?: number; limit?: number; status?: WorkshopStatus }) {
+    const page = filters.page ?? 1;
+    const limit = Math.min(filters.limit ?? 50, 100);
+    const skip = (page - 1) * limit;
+    const where: Prisma.WorkshopWhereInput = {};
+
+    if (filters.status) where.status = filters.status;
+
+    const [workshops, total] = await Promise.all([
+      this.prisma.workshop.findMany({
+        where,
+        include: { speaker: true, room: true },
+        orderBy: { startAt: 'desc' },
+        skip,
+        take: limit,
+      }),
+      this.prisma.workshop.count({ where }),
+    ]);
+
+    const items = await Promise.all(workshops.map((w) => this.toWorkshopResponse(w)));
+    return { items, total, page, limit, totalPages: Math.ceil(total / limit) };
   }
 
   // ==================== ORGANIZER CRUD ====================
@@ -299,6 +316,23 @@ export class CatalogService {
     const seats = Math.max(0, cap - active);
     await this.redis.getClient().set(`seat:${workshopId}`, seats).catch(() => {});
     return seats;
+  }
+
+  private async toWorkshopResponse(
+    workshop: Prisma.WorkshopGetPayload<{ include: { speaker: true; room: true } }>,
+  ) {
+    const seatsLeft = await this.getSeatsLeft(workshop.id, workshop.capacity);
+    const highlights = Array.isArray(workshop.summaryHighlights)
+      ? workshop.summaryHighlights
+      : undefined;
+
+    return {
+      ...workshop,
+      seatsLeft,
+      speakerName: workshop.speaker?.name ?? null,
+      roomName: workshop.room?.name ?? workshop.room?.code ?? null,
+      highlights,
+    };
   }
 
   // ==================== CACHE ====================

@@ -112,6 +112,8 @@ services:
       MINIO_USE_SSL: 'false'
       SMTP_HOST: mailhog
       SMTP_PORT: '1025'
+      MOCK_PG_URL: http://mock-pg:4000
+      MOCK_AI_URL: http://mock-ai:4100
     ports:
       - '${BACKEND_PORT:-3000}:3000'
     volumes:

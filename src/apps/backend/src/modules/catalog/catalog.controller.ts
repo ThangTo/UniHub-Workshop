@@ -68,6 +68,25 @@ export class CatalogController {
     );
   }
 
+  @Roles('ORGANIZER', 'SYS_ADMIN')
+  @Get('admin/list')
+  async adminList(
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('status') status?: string,
+  ) {
+    const normalizedStatus =
+      status && ['DRAFT', 'PUBLISHED', 'CANCELLED', 'ENDED'].includes(status)
+        ? (status as 'DRAFT' | 'PUBLISHED' | 'CANCELLED' | 'ENDED')
+        : undefined;
+
+    return this.catalog.adminList({
+      page: page ? parseInt(page, 10) : undefined,
+      limit: limit ? parseInt(limit, 10) : undefined,
+      status: normalizedStatus,
+    });
+  }
+
   @Public()
   @Get(':id')
   async detail(@Param('id', ParseUUIDPipe) id: string) {

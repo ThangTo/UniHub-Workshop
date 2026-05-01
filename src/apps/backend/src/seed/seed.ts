@@ -32,6 +32,9 @@ async function main() {
     { code: '21120001', name: 'Nguyễn Văn A', faculty: 'CNTT', cohort: '2021' },
     { code: '21120002', name: 'Trần Thị B',   faculty: 'CNTT', cohort: '2021' },
     { code: '21120003', name: 'Lê Văn C',     faculty: 'KTPM', cohort: '2021' },
+    { code: '21120004', name: 'Demo Student 04', faculty: 'CNTT', cohort: '2021' },
+    { code: '21120005', name: 'Demo Student 05', faculty: 'CNTT', cohort: '2021' },
+    { code: '21120006', name: 'Demo Student 06', faculty: 'CNTT', cohort: '2021' },
     { code: '22120004', name: 'Phạm Thị D',   faculty: 'CNTT', cohort: '2022' },
     { code: '22120005', name: 'Hoàng Văn E',  faculty: 'HTTT', cohort: '2022' },
   ];
@@ -163,7 +166,7 @@ async function main() {
   console.log('  - admin@unihub.local      [SYS_ADMIN]    (created by BootstrapService)');
   console.log('  - organizer@unihub.local  [ORGANIZER]');
   console.log('  - staff@unihub.local      [CHECKIN_STAFF]');
-  console.log('\nSample MSSVs for /auth/register: 21120001..21120003, 22120004..22120005');
+  console.log('\nSample MSSVs for /auth/register: 21120001..21120006, 22120004..22120005');
 }
 
 main()

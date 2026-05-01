@@ -7,13 +7,14 @@ import {
   NotFoundException,
   UnprocessableEntityException,
 } from '@nestjs/common';
-import { Prisma, Registration, RegistrationStatus, WorkshopStatus } from '@prisma/client';
+import { PaymentStatus, Prisma, Registration, RegistrationStatus, WorkshopStatus } from '@prisma/client';
 import { v4 as uuid } from 'uuid';
 import { PrismaService } from '../../infra/prisma/prisma.service';
 import { OutboxService } from '../outbox/outbox.service';
 import { AuditService } from '../audit/audit.service';
 import { SeatService } from './seat.service';
 import { QrTokenService } from './qr-token.service';
+import { AuthenticatedUser } from '../../common/types/auth.types';
 
 const HOLD_TTL_NORMAL = 15 * 60; // 15 phút
 const HOLD_TTL_DEGRADED = 5 * 60; // 5 phút khi payment circuit Open
@@ -27,6 +28,27 @@ export interface RegistrationCreatedResult {
   qrImageDataUrl?: string;
   holdExpiresAt?: Date;
   paymentUnavailable?: boolean;
+}
+
+export interface RegistrationListItem {
+  id: string;
+  workshopId: string;
+  workshopTitle: string;
+  studentId: string;
+  studentName?: string | null;
+  studentCode?: string | null;
+  status: RegistrationStatus;
+  feeAmount: number;
+  startAt: Date;
+  endAt: Date;
+  createdAt: Date;
+  holdExpiresAt?: Date | null;
+  confirmedAt?: Date | null;
+  cancelledAt?: Date | null;
+  qrToken?: string | null;
+  paymentStatus?: 'PENDING' | 'SUCCEEDED' | 'FAILED' | 'REFUNDED' | null;
+  checkedIn?: boolean;
+  checkedInAt?: Date | null;
 }
 
 @Injectable()
@@ -276,23 +298,109 @@ export class RegistrationService {
   /**
    * Hiển thị registrations của user hiện tại.
    */
-  async listMine(studentUserId: string): Promise<Registration[]> {
-    return this.prisma.registration.findMany({
+  async listMine(studentUserId: string): Promise<RegistrationListItem[]> {
+    const regs = await this.prisma.registration.findMany({
       where: { studentId: studentUserId },
       orderBy: { createdAt: 'desc' },
       include: {
         workshop: {
           select: { id: true, title: true, startAt: true, endAt: true, feeAmount: true, status: true },
         },
-      } as Prisma.RegistrationInclude,
+        student: { select: { id: true, fullName: true, studentCode: true } },
+        payments: {
+          select: { status: true },
+          orderBy: { createdAt: 'desc' },
+          take: 1,
+        },
+        checkin: { select: { scannedAt: true } },
+      },
       take: 50,
     });
+
+    return regs.map((reg) => this.toListItem(reg));
   }
 
-  async getById(regId: string, studentUserId: string): Promise<Registration> {
-    const reg = await this.prisma.registration.findUnique({ where: { id: regId } });
+  async getById(regId: string, studentUserId: string): Promise<RegistrationListItem> {
+    const reg = await this.prisma.registration.findUnique({
+      where: { id: regId },
+      include: {
+        workshop: { select: { id: true, title: true, startAt: true, endAt: true, feeAmount: true, status: true } },
+        student: { select: { id: true, fullName: true, studentCode: true } },
+        payments: { select: { status: true }, orderBy: { createdAt: 'desc' }, take: 1 },
+        checkin: { select: { scannedAt: true } },
+      },
+    });
     if (!reg) throw new NotFoundException('registration_not_found');
     if (reg.studentId !== studentUserId) throw new ForbiddenException('not_owner');
-    return reg;
+    return this.toListItem(reg);
+  }
+
+  async listAdmin(
+    user: AuthenticatedUser,
+    filters: { workshopId?: string; status?: RegistrationStatus; limit?: number; offset?: number },
+  ): Promise<RegistrationListItem[]> {
+    const limit = Math.min(filters.limit ?? 100, 200);
+    const isSysAdmin = user.roles.includes('SYS_ADMIN');
+
+    const regs = await this.prisma.registration.findMany({
+      where: {
+        workshopId: filters.workshopId,
+        status: filters.status,
+        workshop: isSysAdmin ? undefined : { createdBy: user.id },
+      },
+      orderBy: { createdAt: 'desc' },
+      skip: filters.offset ?? 0,
+      take: limit,
+      include: {
+        workshop: { select: { id: true, title: true, startAt: true, endAt: true, feeAmount: true, status: true } },
+        student: { select: { id: true, fullName: true, studentCode: true } },
+        payments: { select: { status: true }, orderBy: { createdAt: 'desc' }, take: 1 },
+        checkin: { select: { scannedAt: true } },
+      },
+    });
+
+    return regs.map((reg) => this.toListItem(reg));
+  }
+
+  private toListItem(
+    reg: Prisma.RegistrationGetPayload<{
+      include: {
+        workshop: { select: { id: true; title: true; startAt: true; endAt: true; feeAmount: true; status: true } };
+        student: { select: { id: true; fullName: true; studentCode: true } };
+        payments: { select: { status: true }; orderBy: { createdAt: 'desc' }; take: 1 };
+        checkin: { select: { scannedAt: true } };
+      };
+    }>,
+  ): RegistrationListItem {
+    const payment = reg.payments[0];
+    return {
+      id: reg.id,
+      workshopId: reg.workshopId,
+      workshopTitle: reg.workshop.title,
+      studentId: reg.studentId,
+      studentName: reg.student.fullName,
+      studentCode: reg.student.studentCode,
+      status: reg.status,
+      feeAmount: reg.feeAmount,
+      startAt: reg.workshop.startAt,
+      endAt: reg.workshop.endAt,
+      createdAt: reg.createdAt,
+      holdExpiresAt: reg.holdExpiresAt,
+      confirmedAt: reg.confirmedAt,
+      cancelledAt: reg.cancelledAt,
+      qrToken: reg.qrToken,
+      paymentStatus: payment ? this.toPaymentStatus(payment.status) : null,
+      checkedIn: !!reg.checkin,
+      checkedInAt: reg.checkin?.scannedAt ?? null,
+    };
+  }
+
+  private toPaymentStatus(
+    status: PaymentStatus,
+  ): RegistrationListItem['paymentStatus'] {
+    if (status === 'SUCCESS') return 'SUCCEEDED';
+    if (status === 'REFUNDED') return 'REFUNDED';
+    if (status === 'FAILED') return 'FAILED';
+    return 'PENDING';
   }
 }

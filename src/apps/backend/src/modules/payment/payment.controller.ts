@@ -5,6 +5,8 @@ import {
   Get,
   Headers,
   HttpCode,
+  Param,
+  ParseUUIDPipe,
   Post,
   Req,
   UnauthorizedException,
@@ -50,6 +52,15 @@ export class PaymentController {
       qrImageDataUrl: result.qrImageDataUrl,
       retryAfterSec: result.retryAfterSec,
     };
+  }
+
+  @Roles('STUDENT')
+  @Get('payments/:id')
+  async detail(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.svc.getForStudent(user.id, id);
   }
 
   /**

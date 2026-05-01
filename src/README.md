@@ -96,7 +96,10 @@ Các tài khoản mẫu khác được tạo bởi `pnpm db:seed` (xem `apps/bac
 pnpm --filter ./apps/backend dev
 
 # Chạy student-web dev
-pnpm --filter ./apps/student-web dev
+pnpm dev:student
+
+# Cháº¡y admin-web dev
+pnpm dev:admin
 
 # Lint / format
 pnpm lint
@@ -112,7 +115,7 @@ pnpm format
 - [x] **Phase 4** — AI summary pipeline (PDF → MinIO → pdfjs → Mock AI → cache theo SHA-256)
 - [x] **Phase 5** — CSV sync cron (mssv import + atomic move + quarantine + advisory lock)
 - [ ] **Phase 6** — Expo mobile (offline SQLite check-in)
-- [ ] **Phase 7** — Student web + Admin web (Vite/React UI)
+- [x] **Phase 7** — Student web + Admin web (Vite/React UI)
 - [ ] **Phase 8** — Demo scripts (k6 load, race-condition, idempotency)
 
 ## Smoke test Phase 4 (AI Summary)
@@ -161,3 +164,21 @@ Folder mặc định (override qua env `CSV_DROP_DIR/CSV_QUARANTINE_DIR/CSV_ARCH
 | Drop       | `apps/backend/data/csv-drop/`       |
 | Archive    | `apps/backend/data/csv-archive/`    |
 | Quarantine | `apps/backend/data/csv-quarantine/` |
+
+## Smoke test Phase 7 (Web apps)
+
+```bash
+# Build frontend production bundles
+pnpm build:web
+
+# Chạy local dev từng app
+pnpm dev:student
+pnpm dev:admin
+
+# Chạy bằng Docker Compose cùng backend + mock services
+pnpm web:up
+```
+
+Student Web có các luồng chính: login/register, xem danh sách workshop, xem detail + AI summary, đăng ký, thanh toán mock, xem QR token.
+
+Admin Web có các luồng chính: login organizer/sys-admin, CRUD/publish/cancel workshop, upload PDF + retry AI summary, xem registrations/check-ins, quản lý staff assignments và trigger CSV sync.

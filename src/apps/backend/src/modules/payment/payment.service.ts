@@ -25,6 +25,17 @@ export interface InitiateResult {
   retryAfterSec?: number;
 }
 
+export interface PaymentDetailResponse {
+  id: string;
+  registrationId: string;
+  amount: number;
+  currency: string;
+  status: 'PENDING' | 'SUCCEEDED' | 'FAILED' | 'REFUNDED';
+  gatewayTxnId?: string | null;
+  createdAt: Date;
+  finalizedAt?: Date | null;
+}
+
 @Injectable()
 export class PaymentService {
   private readonly logger = new Logger(PaymentService.name);
@@ -229,6 +240,18 @@ export class PaymentService {
     return this.gateway.getHealth();
   }
 
+  async getForStudent(studentUserId: string, paymentId: string): Promise<PaymentDetailResponse> {
+    const payment = await this.prisma.payment.findUnique({
+      where: { id: paymentId },
+      include: { registration: true },
+    });
+
+    if (!payment) throw new NotFoundException('payment_not_found');
+    if (payment.registration.studentId !== studentUserId) throw new ForbiddenException('not_owner');
+
+    return this.toDetailResponse(payment);
+  }
+
   // --- Internal ---
 
   private async completePaymentSuccess(
@@ -319,6 +342,31 @@ export class PaymentService {
       return { status: 'pending', payment };
     }
     return { status: 'pending', payment };
+  }
+
+  private toDetailResponse(payment: Payment): PaymentDetailResponse {
+    const terminal =
+      payment.status === PaymentStatus.SUCCESS ||
+      payment.status === PaymentStatus.FAILED ||
+      payment.status === PaymentStatus.REFUNDED;
+
+    return {
+      id: payment.id,
+      registrationId: payment.registrationId,
+      amount: payment.amount,
+      currency: payment.currency,
+      status: this.toUiStatus(payment.status),
+      gatewayTxnId: payment.gatewayTxnId,
+      createdAt: payment.createdAt,
+      finalizedAt: terminal ? payment.updatedAt : null,
+    };
+  }
+
+  private toUiStatus(status: PaymentStatus): PaymentDetailResponse['status'] {
+    if (status === PaymentStatus.SUCCESS) return 'SUCCEEDED';
+    if (status === PaymentStatus.REFUNDED) return 'REFUNDED';
+    if (status === PaymentStatus.FAILED) return 'FAILED';
+    return 'PENDING';
   }
 
   private async publishOutbox(aggregateId: string, eventType: string, payload: object): Promise<void> {
