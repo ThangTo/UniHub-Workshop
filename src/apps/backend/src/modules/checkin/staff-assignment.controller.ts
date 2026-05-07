@@ -80,12 +80,16 @@ export class StaffAssignmentController {
   @Roles('ORGANIZER', 'SYS_ADMIN', 'CHECKIN_STAFF')
   @Get()
   async list(
+    @CurrentUser() actor: AuthenticatedUser,
     @Query('staffId') staffId?: string,
     @Query('workshopId') workshopId?: string,
   ) {
+    const isInternalAdmin = actor.roles.includes('ORGANIZER') || actor.roles.includes('SYS_ADMIN');
+    const effectiveStaffId = isInternalAdmin ? staffId : actor.id;
+
     return this.prisma.staffRoomAssignment.findMany({
       where: {
-        ...(staffId ? { staffId } : {}),
+        ...(effectiveStaffId ? { staffId: effectiveStaffId } : {}),
         ...(workshopId ? { workshopId } : {}),
       },
       include: {

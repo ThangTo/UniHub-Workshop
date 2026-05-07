@@ -51,6 +51,7 @@ export type CheckinResultCode =
   | 'not_yet_valid'
   | 'revoked'
   | 'invalid_registration'
+  | 'not_assigned'
   | 'wrong_room'
   | 'unknown_error';
 

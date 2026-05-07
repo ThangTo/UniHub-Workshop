@@ -32,9 +32,9 @@ export class CheckinController {
    */
   @Roles('CHECKIN_STAFF', 'SYS_ADMIN')
   @Get('registrations/:id/verify')
-  async verifyOne(@Param('id', ParseUUIDPipe) id: string) {
+  async verifyOne(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: AuthenticatedUser) {
     try {
-      return await this.svc.verifySingle(id);
+      return await this.svc.verifySingle(id, user);
     } catch (e) {
       if ((e as Error).message === 'registration_not_found') {
         throw new NotFoundException({ code: 'registration_not_found' });
@@ -59,6 +59,6 @@ export class CheckinController {
   @Post('checkin/batch')
   @HttpCode(HttpStatus.OK)
   async batch(@Body() dto: BatchCheckinDto, @CurrentUser() user: AuthenticatedUser) {
-    return this.svc.batch(user.id, dto);
+    return this.svc.batch(user, dto);
   }
 }

@@ -315,9 +315,11 @@ export class PaymentService {
 
     const updated = await this.prisma.payment.findUniqueOrThrow({ where: { id: paymentId } });
     if (holdExpired) {
+      await this.seats.reconcileFromDb(reg.workshopId);
       return { status: 'failed', payment: updated };
     }
 
+    await this.seats.reconcileFromDb(reg.workshopId);
     const qrImageDataUrl = qrToken ? await this.qr.toDataUrl(qrToken) : undefined;
     return { status: 'success', payment: updated, qrToken, qrImageDataUrl };
   }

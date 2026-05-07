@@ -13,12 +13,10 @@ src/
 │   ├── backend/           # NestJS modular monolith + workers (Auth, Catalog, Registration, Payment, Notification, Checkin, AI Summary, CSV Sync)
 │   ├── student-web/       # Vite + React student portal
 │   ├── admin-web/         # Vite + React organizer/sys-admin portal
-│   └── mobile/            # Expo React Native (CHECKIN_STAFF, offline SQLite)
+│   └── mobile/            # Expo React Native (CHECKIN_STAFF, offline SQLite queue)
 ├── services/
 │   ├── mock-pg/           # Mock Payment Gateway (Express) — toggle down/timeout để demo Circuit Breaker
 │   └── mock-ai/           # Mock AI summarizer (Express) — toggle down để demo retry/fallback
-├── packages/
-│   └── shared/            # DTO, schema, types dùng chung BE/FE
 ├── data/                  # Volumes runtime: postgres, redis, rabbitmq, minio, csv-drop/quarantine/archive (gitignored)
 ├── docker-compose.yml     # Postgres, Redis, RabbitMQ, MinIO, Mailhog + apps + mock services
 ├── pnpm-workspace.yaml
@@ -82,12 +80,14 @@ Các tài khoản mẫu khác được tạo bởi `pnpm db:seed` (xem `apps/bac
 | `blueprint/specs/rate-limiting.md`                  | `apps/backend/src/common/rate-limit` (Lua token bucket)                  |
 | `blueprint/specs/idempotency.md`                    | `apps/backend/src/common/idempotency`                                    |
 
-## Demo scripts
+## Planned demo scripts
 
-- `scripts/demo/race-condition.ts` — 1000 client cùng đăng ký 1 ghế cuối, expect duy nhất 1 thắng.
-- `scripts/demo/idempotency.ts` — 5 lần POST `/payments` cùng key, expect 1 charge ở Mock PG.
-- `scripts/demo/offline-checkin.md` — kịch bản bật airplane mode trên Expo app.
-- `scripts/k6/registration-load.js` — 3000 vRPS / 60 giây vào `/registrations`.
+Các kịch bản demo/load test dưới đây nằm trong kế hoạch tiếp theo và chưa được commit:
+
+- Race condition — nhiều client cùng đăng ký 1 ghế cuối, expect duy nhất 1 thắng.
+- Idempotency — nhiều lần POST `/payments` cùng key, expect 1 charge ở Mock PG.
+- Offline check-in — bật airplane mode trên Expo app, queue SQLite, bật mạng rồi sync.
+- k6 registration load — traffic lớn vào `/registrations`.
 
 ## Phát triển
 
@@ -98,8 +98,11 @@ pnpm --filter ./apps/backend dev
 # Chạy student-web dev
 pnpm dev:student
 
-# Cháº¡y admin-web dev
+# Chạy admin-web dev
 pnpm dev:admin
+
+# Chạy mobile check-in app
+pnpm --filter ./apps/mobile start
 
 # Lint / format
 pnpm lint
@@ -114,7 +117,7 @@ pnpm format
 - [x] **Phase 3** — Check-in API (offline-aware idempotent) + Notification adapter
 - [x] **Phase 4** — AI summary pipeline (PDF → MinIO → pdfjs → Mock AI → cache theo SHA-256)
 - [x] **Phase 5** — CSV sync cron (mssv import + atomic move + quarantine + advisory lock)
-- [ ] **Phase 6** — Expo mobile (offline SQLite check-in)
+- [x] **Phase 6** — Expo mobile (offline SQLite check-in queue + batch sync)
 - [x] **Phase 7** — Student web + Admin web (Vite/React UI)
 - [ ] **Phase 8** — Demo scripts (k6 load, race-condition, idempotency)
 

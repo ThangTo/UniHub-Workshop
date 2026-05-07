@@ -78,7 +78,7 @@ export class CatalogService {
       where: { id },
       include: { speaker: true, room: true },
     });
-    if (!w) throw new NotFoundException('workshop_not_found');
+    if (!w || w.status !== 'PUBLISHED') throw new NotFoundException('workshop_not_found');
 
     const result = await this.toWorkshopResponse(w);
     await this.safeRedisSet(cacheKey, JSON.stringify(result), CACHE_TTL);
@@ -338,9 +338,25 @@ export class CatalogService {
   // ==================== CACHE ====================
   private async invalidateCache(): Promise<void> {
     try {
-      const keys = await this.redis.getClient().keys(`${CACHE_PREFIX}:*`);
+      const keys = await this.scanKeys(`${CACHE_PREFIX}:*`);
       if (keys.length > 0) await this.redis.getClient().del(...keys);
     } catch { /* best effort */ }
+  }
+
+  /**
+   * SCAN thay cho KEYS — không block Redis single-thread.
+   * Trả về tất cả key match pattern (dùng cho cache invalidation).
+   */
+  private async scanKeys(pattern: string): Promise<string[]> {
+    const client = this.redis.getClient();
+    const result: string[] = [];
+    let cursor = '0';
+    do {
+      const [next, batch] = await client.scan(cursor, 'MATCH', pattern, 'COUNT', 100);
+      cursor = next;
+      result.push(...batch);
+    } while (cursor !== '0');
+    return result;
   }
 
   private async safeRedisGet(key: string): Promise<string | null> {

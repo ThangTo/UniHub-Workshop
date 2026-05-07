@@ -1,9 +1,10 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { ForbiddenException, Injectable, Logger } from '@nestjs/common';
 import { Prisma, RegistrationStatus } from '@prisma/client';
 import { PrismaService } from '../../infra/prisma/prisma.service';
 import { RedisService } from '../../infra/redis/redis.service';
 import { OutboxService } from '../outbox/outbox.service';
 import { AuditService } from '../audit/audit.service';
+import { AuthenticatedUser } from '../../common/types/auth.types';
 import { QrTokenService, QrTokenPayload } from '../registration/qr-token.service';
 import {
   BatchCheckinDto,
@@ -47,7 +48,7 @@ export class CheckinService {
   /**
    * Check chi tiết SV từ regId (specs/checkin.md §D) — staff xem trước khi confirm.
    */
-  async verifySingle(regId: string): Promise<SingleVerifyResult> {
+  async verifySingle(regId: string, staff: AuthenticatedUser): Promise<SingleVerifyResult> {
     const reg = await this.prisma.registration.findUnique({
       where: { id: regId },
       include: {
@@ -58,6 +59,24 @@ export class CheckinService {
     });
     if (!reg) {
       throw new Error('registration_not_found');
+    }
+    if (!staff.roles.includes('SYS_ADMIN')) {
+      const now = new Date();
+      const assignment = await this.prisma.staffRoomAssignment.findFirst({
+        where: {
+          staffId: staff.id,
+          workshopId: reg.workshopId,
+          roomId: reg.workshop.roomId ?? undefined,
+          startsAt: { lte: now },
+          endsAt: { gte: now },
+        },
+      });
+      if (!assignment) {
+        throw new ForbiddenException({
+          code: 'not_assigned',
+          message: 'staff không được phân công workshop/phòng này trong ca hiện tại',
+        });
+      }
     }
     return {
       registration: {
@@ -85,29 +104,28 @@ export class CheckinService {
    *
    * Trả {accepted, duplicates, invalid} — partial success cho phép app retry phần còn lại.
    */
-  async batch(staffId: string, dto: BatchCheckinDto): Promise<BatchCheckinResponse> {
+  async batch(staff: AuthenticatedUser, dto: BatchCheckinDto): Promise<BatchCheckinResponse> {
     const accepted: CheckinItemResult[] = [];
     const duplicates: CheckinItemResult[] = [];
     const invalid: CheckinItemResult[] = [];
 
-    // Cache room assignments của staff trong giờ shift
+    // Cache room assignments của staff trong giờ shift.
     const now = new Date();
-    const assignments = await this.prisma.staffRoomAssignment.findMany({
-      where: { staffId, startsAt: { lte: now }, endsAt: { gte: now } },
-    });
-    const allowedRooms = new Set(assignments.map((a) => a.roomId));
-    // Nếu staff không có shift active → vẫn cho check-in (không bắt buộc shift) nhưng log warn
-    const staffHasShift = allowedRooms.size > 0;
+    const assignments = staff.roles.includes('SYS_ADMIN')
+      ? null
+      : await this.prisma.staffRoomAssignment.findMany({
+          where: { staffId: staff.id, startsAt: { lte: now }, endsAt: { gte: now } },
+        });
 
     for (const item of dto.items) {
-      const res = await this.processItem(staffId, item, allowedRooms, staffHasShift);
+      const res = await this.processItem(staff.id, item, assignments);
       if (res.result === 'accepted') accepted.push(res);
       else if (res.result === 'duplicate') duplicates.push(res);
       else invalid.push(res);
     }
 
     void this.audit.log({
-      actorId: staffId,
+      actorId: staff.id,
       action: 'checkin_batch',
       resource: 'checkin',
       metadata: {
@@ -126,8 +144,7 @@ export class CheckinService {
   private async processItem(
     staffId: string,
     item: CheckinItemDto,
-    allowedRooms: Set<string>,
-    staffHasShift: boolean,
+    assignments: Array<{ workshopId: string; roomId: string }> | null,
   ): Promise<CheckinItemResult> {
     let payload: QrTokenPayload;
     try {
@@ -185,14 +202,28 @@ export class CheckinService {
       };
     }
 
-    // Wrong room (chỉ cảnh báo nếu staff có shift; nếu không có shift thì bỏ qua)
-    if (staffHasShift && reg.workshop.roomId && !allowedRooms.has(reg.workshop.roomId)) {
-      return {
-        idempotencyKey: item.idempotencyKey,
-        regId: payload.regId,
-        result: 'wrong_room',
-        message: 'workshop không thuộc phòng staff đang trực',
-      };
+    if (assignments) {
+      const matchingAssignment = assignments.find((assignment) => (
+        assignment.workshopId === payload.workshopId &&
+        (!reg.workshop.roomId || assignment.roomId === reg.workshop.roomId)
+      ));
+      if (!matchingAssignment) {
+        const hasWorkshopAssignment = assignments.some((assignment) => assignment.workshopId === payload.workshopId);
+        if (!hasWorkshopAssignment) {
+          return {
+            idempotencyKey: item.idempotencyKey,
+            regId: payload.regId,
+            result: 'not_assigned',
+            message: 'staff không được phân công workshop này trong ca hiện tại',
+          };
+        }
+        return {
+          idempotencyKey: item.idempotencyKey,
+          regId: payload.regId,
+          result: 'wrong_room',
+          message: 'workshop không thuộc phòng staff đang trực',
+        };
+      }
     }
 
     // Idempotent INSERT

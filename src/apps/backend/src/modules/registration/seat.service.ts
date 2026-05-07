@@ -1,5 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { RegistrationStatus } from '@prisma/client';
 import { RedisService } from '../../infra/redis/redis.service';
+import { PrismaService } from '../../infra/prisma/prisma.service';
 import { ALLOCATE_SEAT_LUA, RELEASE_SEAT_LUA } from './lua/scripts';
 
 export type AllocateResult =
@@ -23,7 +25,10 @@ export class SeatService {
   private readonly allocateSrc = ALLOCATE_SEAT_LUA;
   private readonly releaseSrc = RELEASE_SEAT_LUA;
 
-  constructor(private readonly redis: RedisService) {}
+  constructor(
+    private readonly redis: RedisService,
+    private readonly prisma: PrismaService,
+  ) {}
 
   static seatKey(workshopId: string): string {
     return `seat:${workshopId}`;
@@ -97,5 +102,33 @@ export class SeatService {
    */
   async setSeatsLeft(workshopId: string, seatsLeft: number): Promise<void> {
     await this.redis.getClient().set(SeatService.seatKey(workshopId), String(seatsLeft));
+  }
+
+  /**
+   * Rebuild seat counter from the durable source of truth.
+   *
+   * Redis hold keys are intentionally short-lived. Once a registration becomes
+   * CONFIRMED, the durable DB row is the authority; this method repairs Redis
+   * after cancellation, expiry, or any failed Redis release.
+   */
+  async reconcileFromDb(workshopId: string): Promise<number> {
+    const workshop = await this.prisma.workshop.findUnique({
+      where: { id: workshopId },
+      select: { capacity: true },
+    });
+    if (!workshop) {
+      this.logger.warn(`Cannot reconcile seats for missing workshop=${workshopId}`);
+      return 0;
+    }
+
+    const active = await this.prisma.registration.count({
+      where: {
+        workshopId,
+        status: { in: [RegistrationStatus.CONFIRMED, RegistrationStatus.PENDING_PAYMENT] },
+      },
+    });
+    const seatsLeft = Math.max(0, workshop.capacity - active);
+    await this.setSeatsLeft(workshopId, seatsLeft);
+    return seatsLeft;
   }
 }

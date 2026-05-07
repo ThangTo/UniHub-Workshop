@@ -36,6 +36,7 @@ export class HoldSweeperJob {
       if (expired.length === 0) return;
 
       this.logger.log(`Sweeping ${expired.length} expired holds`);
+      const touchedWorkshopIds = new Set<string>();
       for (const reg of expired) {
         try {
           await this.prisma.$transaction(async (tx) => {
@@ -54,10 +55,33 @@ export class HoldSweeperJob {
               },
             });
           });
-          await this.seats.release(reg.workshopId, reg.studentId, '');
+          // Seat release nằm ngoài TX — retry nếu Redis tạm lỗi,
+          // tránh ghế bị hold vĩnh viễn khi DB đã EXPIRED nhưng Redis chưa release.
+          let released = false;
+          for (let attempt = 1; attempt <= 3; attempt++) {
+            try {
+              await this.seats.release(reg.workshopId, reg.studentId, '');
+              released = true;
+              break;
+            } catch (e) {
+              this.logger.warn(
+                `Seat release attempt ${attempt}/3 failed for reg=${reg.id}: ${(e as Error).message}`,
+              );
+              if (attempt < 3) await new Promise((r) => setTimeout(r, attempt * 500));
+            }
+          }
+          if (!released) {
+            this.logger.error(
+              `⚠️ Seat NOT released after 3 attempts for reg=${reg.id} workshop=${reg.workshopId} — manual fix required`,
+            );
+          }
+          touchedWorkshopIds.add(reg.workshopId);
         } catch (e) {
           this.logger.warn(`Sweep failed for reg=${reg.id}: ${(e as Error).message}`);
         }
+      }
+      for (const workshopId of touchedWorkshopIds) {
+        await this.seats.reconcileFromDb(workshopId);
       }
     } catch (e) {
       this.logger.error(`HoldSweeper tick error: ${(e as Error).message}`);

@@ -169,10 +169,18 @@ export class AiSummaryWorker implements OnModuleInit {
   /**
    * Xoá Redis cache `cache:workshop:*` để client polling thấy summary ngay
    * thay vì chờ TTL 5 phút (catalog.service dùng cùng prefix).
+   * Dùng SCAN thay cho KEYS để không block Redis single-thread.
    */
   private async invalidateCatalogCache(): Promise<void> {
     const client = this.redis.getClient();
-    const keys = await client.keys('cache:workshop:*');
+    const pattern = 'cache:workshop:*';
+    const keys: string[] = [];
+    let cursor = '0';
+    do {
+      const [next, batch] = await client.scan(cursor, 'MATCH', pattern, 'COUNT', 100);
+      cursor = next;
+      keys.push(...batch);
+    } while (cursor !== '0');
     if (keys.length > 0) await client.del(...keys);
   }
 

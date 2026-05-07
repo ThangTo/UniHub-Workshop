@@ -1,0 +1,16 @@
+{
+  "expo": {
+    "name": "UniHub Check-in",
+    "slug": "unihub-checkin",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "assetBundlePatterns": ["**/*"],
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "package": "local.unihub.checkin"
+    }
+  }
+}

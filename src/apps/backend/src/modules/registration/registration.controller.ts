@@ -19,12 +19,14 @@ import { AuthenticatedUser } from '../../common/types/auth.types';
 import { CreateRegistrationDto } from './dto/create-registration.dto';
 import { RegistrationService } from './registration.service';
 import { PrismaService } from '../../infra/prisma/prisma.service';
+import { PaymentGatewayClient } from '../payment/payment-gateway.client';
 
 @Controller()
 export class RegistrationController {
   constructor(
     private readonly svc: RegistrationService,
     private readonly prisma: PrismaService,
+    private readonly paymentGateway: PaymentGatewayClient,
   ) {}
 
   /**
@@ -41,7 +43,9 @@ export class RegistrationController {
   @Idempotent({ required: true, intentFields: ['workshopId'] })
   @Post('registrations')
   async create(@Body() dto: CreateRegistrationDto, @CurrentUser() user: AuthenticatedUser) {
-    const result = await this.svc.create(user.id, dto.workshopId);
+    const result = await this.svc.create(user.id, dto.workshopId, {
+      paymentCircuitOpen: this.paymentGateway.isOpen(),
+    });
     return {
       regId: result.registration.id,
       registrationId: result.registration.id,

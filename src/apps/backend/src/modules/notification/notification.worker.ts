@@ -15,6 +15,7 @@ interface OutboxEnvelope {
 const QUEUE = 'notif.dispatcher';
 const ROUTING_KEYS = [
   'registration.confirmed',
+  'registration.hold_created',
   'registration.expired',
   'registration.cancelled',
   'payment.succeeded',
@@ -145,6 +146,35 @@ export class NotificationWorker implements OnModuleInit {
         });
         return;
       }
+      case 'registration.hold_created': {
+        const { regId, workshopId, studentId, fee, holdExpiresAt } = evt.payload as {
+          regId: string;
+          workshopId: string;
+          studentId: string;
+          fee: number;
+          holdExpiresAt: string;
+        };
+        const ws = await this.prisma.workshop.findUnique({
+          where: { id: workshopId },
+          include: { room: true },
+        });
+        const user = await this.prisma.user.findUnique({ where: { id: studentId } });
+        if (!ws || !user) return;
+        await this.notif.dispatch({
+          eventId: evt.id,
+          userId: studentId,
+          templateId: 'registration_hold_created',
+          vars: {
+            userName: user.fullName,
+            workshopTitle: ws.title,
+            fee: fee.toLocaleString('vi-VN'),
+            holdExpiresAt: new Date(holdExpiresAt).toLocaleString('vi-VN'),
+            roomName: ws.room?.name ?? 'Đang cập nhật',
+            regId,
+          },
+        });
+        return;
+      }
       case 'registration.cancelled': {
         const { regId, studentId, refundRequired } = evt.payload as {
           regId: string;
@@ -187,6 +217,38 @@ export class NotificationWorker implements OnModuleInit {
             scannedAt: new Date(scannedAt).toLocaleString('vi-VN'),
           },
         });
+        return;
+      }
+      case 'workshop.cancelled': {
+        const { workshopId, reason } = evt.payload as {
+          workshopId: string;
+          reason: string;
+        };
+        const ws = await this.prisma.workshop.findUnique({
+          where: { id: workshopId },
+        });
+        if (!ws) return;
+        // Notify all students with active registrations
+        const activeRegs = await this.prisma.registration.findMany({
+          where: {
+            workshopId,
+            status: { in: ['CONFIRMED', 'PENDING_PAYMENT'] },
+          },
+        });
+        for (const reg of activeRegs) {
+          const user = await this.prisma.user.findUnique({ where: { id: reg.studentId } });
+          if (!user) continue;
+          await this.notif.dispatch({
+            eventId: `${evt.id}:${reg.id}`,
+            userId: reg.studentId,
+            templateId: 'workshop_cancelled',
+            vars: {
+              userName: user.fullName,
+              workshopTitle: ws.title,
+              reason: reason ?? 'Không ghi nhận',
+            },
+          });
+        }
         return;
       }
       default:

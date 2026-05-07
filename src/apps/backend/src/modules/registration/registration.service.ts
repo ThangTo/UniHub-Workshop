@@ -125,11 +125,14 @@ export class RegistrationService {
     );
     if (!allocated.ok) {
       if (allocated.reason === 'sold_out') throw new ConflictException('sold_out');
-      // already_holding → ai đó (có thể là crash trước đó), force release rồi retry 1 lần
-      this.logger.warn(`Stale hold detected for ${workshopId}/${studentUserId}, force-releasing`);
-      await this.seats.release(workshopId, studentUserId, '');
-      const retry = await this.seats.allocate(workshopId, studentUserId, requestId, workshop.capacity, ttl);
-      if (!retry.ok) throw new ConflictException('sold_out');
+      // A previous request for the same student still owns the Redis hold.
+      // Do not force-release it: with concurrent idempotent retries that can
+      // steal the in-flight request's seat and corrupt the counter.
+      throw new ConflictException({
+        code: 'registration_in_progress',
+        message: 'A seat hold already exists for this student and workshop.',
+        existingRequestId: allocated.existingRequestId,
+      });
     }
 
     // 5. Insert registration + outbox trong cùng transaction
@@ -283,6 +286,7 @@ export class RegistrationService {
     });
 
     await this.seats.release(reg.workshopId, reg.studentId, '');
+    await this.seats.reconcileFromDb(reg.workshopId);
 
     void this.audit.log({
       actorId: studentUserId,

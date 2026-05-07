@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   CallHandler,
+  ConflictException,
   ExecutionContext,
   Injectable,
   Logger,
@@ -82,6 +83,7 @@ export class IdempotencyInterceptor implements NestInterceptor {
       // Chưa completed → đợi ngắn rồi check lại (tối đa 3 lần × 100ms)
       const replayed = await this.waitForCompletion(redisKey, hash, res);
       if (replayed !== null) return replayed;
+      throw new ConflictException('idempotency_request_in_progress');
     }
 
     // --- 2. Fallback DB ---
@@ -115,7 +117,7 @@ export class IdempotencyInterceptor implements NestInterceptor {
       // Race: ai đó đã claim → đợi
       const replayed = await this.waitForCompletion(redisKey, hash, res);
       if (replayed !== null) return replayed;
-      // Nếu vẫn không xong, tiếp tục xử lý (fallback safe)
+      throw new ConflictException('idempotency_request_in_progress');
     }
 
     // --- 4. Insert pending row DB ---
