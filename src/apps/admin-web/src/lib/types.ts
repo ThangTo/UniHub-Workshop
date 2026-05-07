@@ -68,13 +68,23 @@ export interface ImportJob {
 }
 
 export interface StaffAssignment {
-  id: string;
   staffId: string;
-  staffName?: string;
+  staff?: {
+    id: string;
+    fullName: string;
+    email: string;
+  };
+  workshopId: string;
+  workshop?: {
+    id: string;
+    title: string;
+  };
   roomId: string;
-  roomName?: string;
-  workshopId?: string | null;
-  workshopTitle?: string | null;
+  room?: {
+    id: string;
+    name: string;
+    code: string;
+  };
   startsAt: string;
   endsAt: string;
 }

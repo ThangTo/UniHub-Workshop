@@ -14,6 +14,7 @@ export function StaffAssignmentsScreen() {
         '/staff-assignments',
       );
       setItems(Array.isArray(r.data) ? r.data : r.data.items);
+      setError(null);
     } catch (e) {
       setError(apiError(e));
     }
@@ -23,10 +24,14 @@ export function StaffAssignmentsScreen() {
     void load();
   }, []);
 
-  async function onDelete(id: string) {
+  async function onDelete(assignment: StaffAssignment) {
     if (!confirm('Xoá phân công này?')) return;
     try {
-      await api.delete(`/staff-assignments/${id}`);
+      const params = new URLSearchParams({
+        staffId: assignment.staffId,
+        workshopId: assignment.workshopId,
+      });
+      await api.delete(`/staff-assignments?${params.toString()}`);
       void load();
     } catch (e) {
       alert(apiError(e));
@@ -39,8 +44,7 @@ export function StaffAssignmentsScreen() {
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Phân công CHECKIN_STAFF</h1>
           <p className="text-sm text-slate-500">
-            Mỗi shift gán staff cho 1 phòng cụ thể trong khoảng thời gian. Check-in batch sẽ
-            kiểm tra nếu workshop không thuộc phòng này → cảnh báo wrong_room.
+            Mỗi shift gán staff cho đúng workshop và phòng. Backend dùng khoá ghép staffId + workshopId.
           </p>
         </div>
         <button className="btn-primary" onClick={() => setShowForm(true)}>
@@ -62,7 +66,7 @@ export function StaffAssignmentsScreen() {
         />
       )}
 
-      {!items && !error && <div className="text-slate-500">Đang tải…</div>}
+      {!items && !error && <div className="text-slate-500">Đang tải...</div>}
       {items && items.length === 0 && (
         <div className="card p-8 text-center text-slate-500">Chưa có phân công nào.</div>
       )}
@@ -73,7 +77,7 @@ export function StaffAssignmentsScreen() {
               <tr>
                 <th>Staff</th>
                 <th>Phòng</th>
-                <th>Workshop (optional)</th>
+                <th>Workshop</th>
                 <th>Bắt đầu</th>
                 <th>Kết thúc</th>
                 <th></th>
@@ -81,17 +85,19 @@ export function StaffAssignmentsScreen() {
             </thead>
             <tbody>
               {items.map((a) => (
-                <tr key={a.id}>
+                <tr key={`${a.staffId}:${a.workshopId}`}>
                   <td>
-                    <div className="font-medium text-slate-900">{a.staffName ?? a.staffId.slice(0, 8)}</div>
-                    <div className="text-xs text-slate-500">{a.staffId}</div>
+                    <div className="font-medium text-slate-900">
+                      {a.staff?.fullName ?? a.staffId.slice(0, 8)}
+                    </div>
+                    <div className="text-xs text-slate-500">{a.staff?.email ?? a.staffId}</div>
                   </td>
-                  <td>{a.roomName ?? a.roomId}</td>
-                  <td className="text-xs text-slate-500">{a.workshopTitle ?? a.workshopId ?? '—'}</td>
+                  <td>{a.room ? `${a.room.code} - ${a.room.name}` : a.roomId}</td>
+                  <td className="text-xs text-slate-500">{a.workshop?.title ?? a.workshopId}</td>
                   <td className="text-xs">{formatDateTime(a.startsAt)}</td>
                   <td className="text-xs">{formatDateTime(a.endsAt)}</td>
                   <td>
-                    <button className="btn-ghost text-xs text-red-600" onClick={() => onDelete(a.id)}>
+                    <button className="btn-ghost text-xs text-red-600" onClick={() => onDelete(a)}>
                       Xoá
                     </button>
                   </td>
@@ -122,7 +128,7 @@ function AssignmentForm({ onClose, onSaved }: { onClose(): void; onSaved(): void
       await api.post('/staff-assignments', {
         staffId,
         roomId,
-        workshopId: workshopId || null,
+        workshopId,
         startsAt: fromLocalInput(startsAt),
         endsAt: fromLocalInput(endsAt),
       });
@@ -152,8 +158,8 @@ function AssignmentForm({ onClose, onSaved }: { onClose(): void; onSaved(): void
           <input className="input" required value={roomId} onChange={(e) => setRoomId(e.target.value)} />
         </div>
         <div className="md:col-span-2">
-          <label className="label">Workshop ID (optional)</label>
-          <input className="input" value={workshopId} onChange={(e) => setWorkshopId(e.target.value)} />
+          <label className="label">Workshop ID (uuid)</label>
+          <input className="input" required value={workshopId} onChange={(e) => setWorkshopId(e.target.value)} />
         </div>
         <div>
           <label className="label">Bắt đầu</label>
@@ -185,7 +191,7 @@ function AssignmentForm({ onClose, onSaved }: { onClose(): void; onSaved(): void
             Huỷ
           </button>
           <button type="submit" className="btn-primary" disabled={saving}>
-            {saving ? 'Đang lưu…' : 'Tạo'}
+            {saving ? 'Đang lưu...' : 'Tạo'}
           </button>
         </div>
       </form>

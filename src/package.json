@@ -28,7 +28,10 @@
     "db:migrate:dev": "pnpm --filter \"./apps/backend\" exec prisma migrate dev",
     "db:migrate:deploy": "pnpm --filter \"./apps/backend\" exec prisma migrate deploy",
     "db:generate": "pnpm --filter \"./apps/backend\" exec prisma generate",
-    "db:seed": "pnpm --filter \"./apps/backend\" run seed"
+    "db:seed": "pnpm --filter \"./apps/backend\" run seed",
+    "demo:race": "pnpm --filter \"./apps/backend\" exec node -r ts-node/register/transpile-only ../../scripts/demo/race-condition.ts",
+    "demo:idempotency": "pnpm --filter \"./apps/backend\" exec node -r ts-node/register/transpile-only ../../scripts/demo/idempotency.ts",
+    "demo:k6": "k6 run scripts/k6/registration-load.js"
   },
   "devDependencies": {
     "prettier": "^3.3.3",

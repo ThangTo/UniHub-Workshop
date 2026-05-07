@@ -80,14 +80,14 @@ Các tài khoản mẫu khác được tạo bởi `pnpm db:seed` (xem `apps/bac
 | `blueprint/specs/rate-limiting.md`                  | `apps/backend/src/common/rate-limit` (Lua token bucket)                  |
 | `blueprint/specs/idempotency.md`                    | `apps/backend/src/common/idempotency`                                    |
 
-## Planned demo scripts
+## Demo scripts
 
-Các kịch bản demo/load test dưới đây nằm trong kế hoạch tiếp theo và chưa được commit:
+Phase 8 demo/load scripts are committed under `scripts/demo/` and `scripts/k6/`:
 
-- Race condition — nhiều client cùng đăng ký 1 ghế cuối, expect duy nhất 1 thắng.
-- Idempotency — nhiều lần POST `/payments` cùng key, expect 1 charge ở Mock PG.
-- Offline check-in — bật airplane mode trên Expo app, queue SQLite, bật mạng rồi sync.
-- k6 registration load — traffic lớn vào `/registrations`.
+- Race condition: `pnpm demo:race -- --clients=100` creates 100 demo students and proves capacity=1 produces exactly one active registration.
+- Payment idempotency: `pnpm demo:idempotency -- --attempts=5` repeats `POST /payments` with one `Idempotency-Key` and verifies exactly one durable payment row.
+- Offline check-in runbook: `scripts/demo/offline-checkin.md`.
+- k6 registration load: `pnpm demo:k6` with `WORKSHOP_ID` and either `STUDENT_TOKEN` or `TOKENS_FILE`.
 
 ## Phát triển
 
@@ -113,13 +113,13 @@ pnpm format
 
 - [x] **Phase 0** — Foundation (monorepo + docker-compose + Prisma schema)
 - [x] **Phase 1** — Auth + RBAC + Rate Limit + Idempotency + Outbox + Catalog
-- [x] **Phase 2** — Registration (Lua allocate/release + FCFS queue 202) + Payment + Circuit Breaker + Mock PG
+- [x] **Phase 2** — Registration (Lua allocate/release) + Payment + Circuit Breaker + Mock PG
 - [x] **Phase 3** — Check-in API (offline-aware idempotent) + Notification adapter
 - [x] **Phase 4** — AI summary pipeline (PDF → MinIO → pdfjs → Mock AI → cache theo SHA-256)
 - [x] **Phase 5** — CSV sync cron (mssv import + atomic move + quarantine + advisory lock)
 - [x] **Phase 6** — Expo mobile (offline SQLite check-in queue + batch sync)
 - [x] **Phase 7** — Student web + Admin web (Vite/React UI)
-- [ ] **Phase 8** — Demo scripts (k6 load, race-condition, idempotency)
+- [x] **Phase 8** — Demo scripts (k6 load, race-condition, idempotency, offline check-in runbook)
 
 ## Smoke test Phase 4 (AI Summary)
 
@@ -185,3 +185,30 @@ pnpm web:up
 Student Web có các luồng chính: login/register, xem danh sách workshop, xem detail + AI summary, đăng ký, thanh toán mock, xem QR token.
 
 Admin Web có các luồng chính: login organizer/sys-admin, CRUD/publish/cancel workshop, upload PDF + retry AI summary, xem registrations/check-ins, quản lý staff assignments và trigger CSV sync.
+
+## Smoke test Phase 8 (Demo/load scripts)
+
+```powershell
+# Preconditions: infra + backend are running, apps/backend/.env has stable JWT_PRIVATE_KEY/JWT_PUBLIC_KEY.
+pnpm infra:up
+pnpm --filter ./apps/backend dev
+
+# Race condition: many clients competing for one seat.
+pnpm demo:race -- --clients=100
+
+# Payment idempotency: repeated POST /payments with one key.
+# Mock PG must be running for a full success-path demo.
+pnpm --filter ./services/mock-pg dev
+pnpm demo:idempotency -- --attempts=5
+```
+
+k6 load test requires `k6` installed and a prepared workshop/student token pool:
+
+```bash
+WORKSHOP_ID=<published-workshop-id> TOKENS_FILE=./tokens.json pnpm demo:k6
+```
+
+`scripts/k6/registration-load.js` treats `201`, `409`, and `429` as handled outcomes.
+It also reports that `202 queueId` is not currently implemented by the backend global registration queue.
+
+Manual offline check-in runbook: `scripts/demo/offline-checkin.md`.
