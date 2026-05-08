@@ -117,7 +117,7 @@ pnpm format
 - [x] **Phase 3** — Check-in API (offline-aware idempotent) + Notification adapter
 - [x] **Phase 4** — AI summary pipeline (PDF → MinIO → pdfjs → Mock AI → cache theo SHA-256)
 - [x] **Phase 5** — CSV sync cron (mssv import + atomic move + quarantine + advisory lock)
-- [x] **Phase 6** — Expo mobile (offline SQLite check-in queue + batch sync)
+- [x] **Phase 6** — Expo mobile (JWKS cache + RS256 offline verify + SQLite WAL queue + NetInfo auto-sync)
 - [x] **Phase 7** — Student web + Admin web (Vite/React UI)
 - [x] **Phase 8** — Demo scripts (k6 load, race-condition, idempotency, offline check-in runbook)
 
@@ -185,6 +185,30 @@ pnpm web:up
 Student Web có các luồng chính: login/register, xem danh sách workshop, xem detail + AI summary, đăng ký, thanh toán mock, xem QR token.
 
 Admin Web có các luồng chính: login organizer/sys-admin, CRUD/publish/cancel workshop, upload PDF + retry AI summary, xem registrations/check-ins, quản lý staff assignments và trigger CSV sync.
+
+## Smoke test Phase 6 (Mobile offline check-in)
+
+```powershell
+# Terminal 1: backend
+pnpm infra:up
+pnpm --filter ./apps/backend dev
+
+# Terminal 2: Expo mobile
+pnpm --filter ./apps/mobile start
+```
+
+Trên thiết bị thật, đặt API URL thành `http://<LAN-IP>:3000` thay vì `localhost`.
+Login staff sẽ tự cache `GET /auth/jwks`; sau đó app có thể reject QR sai chữ ký khi offline.
+
+Các luồng cần test:
+
+- Online scan: quét QR hợp lệ → queue → auto-sync → DB có đúng 1 `checkins`.
+- Duplicate: quét lại cùng QR → backend trả `duplicate`, app lưu result item-level.
+- Offline: bật airplane mode → quét QR → SQLite giữ `synced=false`; bật mạng lại → NetInfo auto-sync.
+- Tampered QR: sửa 1 ký tự token → app reject offline, không insert SQLite.
+- Pending logout: còn queue chưa sync → app cảnh báo trước khi logout.
+
+Runbook chi tiết: `scripts/demo/offline-checkin.md`.
 
 ## Smoke test Phase 8 (Demo/load scripts)
 

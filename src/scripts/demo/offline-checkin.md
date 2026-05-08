@@ -51,9 +51,9 @@ one `checkins` row because of `UNIQUE (registration_id)` and
 1. Login while online.
 2. Enable airplane mode or disconnect the phone from Wi-Fi.
 3. Scan one or more QR codes.
-4. Confirm the items remain in the local queue.
+4. Confirm the items remain in the local queue as `pending`.
 5. Disable airplane mode.
-6. Trigger sync from the mobile app.
+6. The app should auto-sync through NetInfo. You can also tap `Sync N`.
 
 Expected result: queued scans are sent as one batch and receive
 `accepted`, `duplicates`, or `invalid` item-level results.
@@ -62,24 +62,25 @@ Expected result: queued scans are sent as one batch and receive
 
 1. Copy a valid QR token.
 2. Change one character in the token payload or signature.
-3. Submit it through the app or through `POST /checkin/batch`.
+3. Paste it into the mobile app while offline.
 
-Expected result: item result is `invalid_signature`.
+Expected result: the app rejects it locally before inserting into SQLite.
 
 ## Scenario E: wrong room
 
 1. In Admin Web, assign the staff member to a room for one workshop.
 2. Scan a registration QR for a different room during that shift.
 
-Expected result: backend returns `wrong_room` for that item. Current backend
-implements the check in `CheckinService`; the UI must surface the item-level
-result to the staff user.
+Expected result: while online, the app calls `/registrations/{regId}/verify`
+before queueing and shows an assignment warning. If the item is submitted,
+backend returns `wrong_room` or `not_assigned`, and the app stores the item-level
+result in the local queue.
 
 ## Known implementation notes
 
 - Backend supports offline-safe batch idempotency today.
-- Mobile currently persists scans locally and can submit batches.
-- Full spec-level offline verification requires cached JWKS, RS256 verification
-  on-device, network-change auto-sync, and logout blocking when the queue is not
-  empty. Use this runbook to demonstrate the current queue/sync behavior and to
-  identify remaining mobile-side gaps.
+- Mobile enables SQLite WAL mode and stores a durable queue.
+- Mobile caches `GET /auth/jwks` after login and verifies QR JWT RS256 offline
+  with the cached public key.
+- Mobile auto-syncs when NetInfo reports the network is back.
+- Mobile warns before logout when the queue still has unsynced scans.
