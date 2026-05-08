@@ -220,26 +220,30 @@ export class NotificationWorker implements OnModuleInit {
         return;
       }
       case 'workshop.cancelled': {
-        const { workshopId, reason } = evt.payload as {
+        const { workshopId, reason, registrations } = evt.payload as {
           workshopId: string;
           reason: string;
+          registrations?: Array<{ id: string; studentId: string }>;
         };
         const ws = await this.prisma.workshop.findUnique({
           where: { id: workshopId },
         });
         if (!ws) return;
-        // Notify all students with active registrations
-        const activeRegs = await this.prisma.registration.findMany({
-          where: {
-            workshopId,
-            status: { in: ['CONFIRMED', 'PENDING_PAYMENT'] },
-          },
-        });
+        // Prefer payload captured before CatalogService marks rows CANCELLED.
+        const activeRegs = registrations?.length
+          ? registrations
+          : await this.prisma.registration.findMany({
+              where: {
+                workshopId,
+                status: { in: ['CONFIRMED', 'PENDING_PAYMENT'] },
+              },
+              select: { id: true, studentId: true },
+            });
         for (const reg of activeRegs) {
           const user = await this.prisma.user.findUnique({ where: { id: reg.studentId } });
           if (!user) continue;
           await this.notif.dispatch({
-            eventId: `${evt.id}:${reg.id}`,
+            eventId: evt.id,
             userId: reg.studentId,
             templateId: 'workshop_cancelled',
             vars: {

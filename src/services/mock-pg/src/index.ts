@@ -32,7 +32,17 @@ interface Charge {
   createdAt: string;
 }
 
+interface Refund {
+  id: string;
+  chargeId: string;
+  amount: number;
+  status: 'SUCCESS' | 'FAILED' | 'PENDING';
+  createdAt: string;
+}
+
 const charges = new Map<string, Charge>();
+const refunds = new Map<string, Refund>();
+const refundsByChargeId = new Map<string, string>();
 const chargesByIdemKey = new Map<string, string>(); // idemKey → chargeId
 
 const app = express();
@@ -67,6 +77,29 @@ async function fireWebhook(charge: Charge): Promise<void> {
       console.log(`[mock-pg] webhook → ${charge.id} ${charge.status}`);
     } catch (e) {
       console.warn(`[mock-pg] webhook failed: ${(e as Error).message}`);
+    }
+  }, 500);
+}
+
+async function fireRefundWebhook(refund: Refund): Promise<void> {
+  const body = {
+    type: 'refund.completed',
+    refundId: refund.id,
+    chargeId: refund.chargeId,
+    status: refund.status,
+    amount: refund.amount,
+    occurredAt: new Date().toISOString(),
+  };
+  const sig = signWebhook(body);
+  setTimeout(async () => {
+    try {
+      await axios.post(WEBHOOK_URL, body, {
+        timeout: 3000,
+        headers: { 'X-Mock-Pg-Signature': sig },
+      });
+      console.log(`[mock-pg] refund webhook â†’ ${refund.id} ${refund.status}`);
+    } catch (e) {
+      console.warn(`[mock-pg] refund webhook failed: ${(e as Error).message}`);
     }
   }, 500);
 }
@@ -151,10 +184,25 @@ app.post('/refund', async (req: Request, res: Response) => {
     res.status(404).json({ error: 'charge_not_refundable' });
     return;
   }
+  const existingRefundId = refundsByChargeId.get(chargeId);
+  if (existingRefundId) {
+    res.json(refunds.get(existingRefundId));
+    return;
+  }
   await sleep(200 + Math.floor(Math.random() * 400));
   const refundId = `rf_${crypto.randomBytes(8).toString('hex')}`;
+  const refund: Refund = {
+    id: refundId,
+    chargeId,
+    amount,
+    status: 'SUCCESS',
+    createdAt: new Date().toISOString(),
+  };
+  refunds.set(refundId, refund);
+  refundsByChargeId.set(chargeId, refundId);
   console.log(`[mock-pg] refund ${refundId} charge=${chargeId} amount=${amount}`);
-  res.json({ id: refundId, chargeId, amount, status: 'SUCCESS', createdAt: new Date().toISOString() });
+  void fireRefundWebhook(refund);
+  res.json(refund);
 });
 
 app.listen(PORT, () => {

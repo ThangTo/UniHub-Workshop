@@ -125,12 +125,13 @@ export class AppConfigService {
   }
 
   // --- Rate limit ---
-  get rateLimit(): { globalRegistrationRps: number; regQueueTtlSec: number } {
+  get rateLimit(): { globalRegistrationRps: number; regQueueTtlSec: number; regQueueMaxItems: number } {
     return {
       globalRegistrationRps: Number(
         this.raw.get<string>('RATE_LIMIT_GLOBAL_REGISTRATION_RPS', '500'),
       ),
       regQueueTtlSec: Number(this.raw.get<string>('RATE_LIMIT_REGQUEUE_TTL_SECONDS', '10')),
+      regQueueMaxItems: Number(this.raw.get<string>('RATE_LIMIT_REGQUEUE_MAX_ITEMS', '5000')),
     };
   }
 

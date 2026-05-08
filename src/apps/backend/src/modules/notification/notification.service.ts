@@ -116,4 +116,57 @@ export class NotificationService {
       }
     }
   }
+
+  async retryFailed(limit = 50): Promise<number> {
+    const failed = await this.prisma.notification.findMany({
+      where: {
+        status: NotificationStatus.FAILED,
+        attempts: { lt: 5 },
+      },
+      include: { user: true },
+      orderBy: { createdAt: 'asc' },
+      take: limit,
+    });
+
+    let sent = 0;
+    for (const notif of failed) {
+      const adapter = this.registry.get(notif.channel);
+      if (!adapter) continue;
+
+      const payload = notif.payload as { vars?: Record<string, unknown> } | null;
+      const rendered = renderTemplate(notif.template, payload?.vars ?? {});
+      try {
+        await adapter.send({
+          to: {
+            userId: notif.user.id,
+            email: notif.user.email,
+            fullName: notif.user.fullName,
+          },
+          subject: rendered.subject,
+          bodyText: rendered.text,
+          bodyHtml: rendered.html,
+          metadata: { template: notif.template, eventId: notif.eventId, retry: true },
+        });
+        await this.prisma.notification.update({
+          where: { id: notif.id },
+          data: {
+            status: NotificationStatus.SENT,
+            sentAt: new Date(),
+            lastError: null,
+          },
+        });
+        sent++;
+      } catch (e) {
+        const msg = (e as Error).message ?? 'unknown';
+        await this.prisma.notification.update({
+          where: { id: notif.id },
+          data: {
+            attempts: { increment: 1 },
+            lastError: msg,
+          },
+        });
+      }
+    }
+    return sent;
+  }
 }

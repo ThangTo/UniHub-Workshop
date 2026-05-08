@@ -6,11 +6,20 @@ import { RegistrationService } from './registration.service';
 import { SeatService } from './seat.service';
 import { QrTokenService } from './qr-token.service';
 import { HoldSweeperJob } from './jobs/hold-sweeper.job';
+import { RegistrationQueueService } from './registration-queue.service';
+import { RegistrationQueueWorker } from './jobs/registration-queue.worker';
 
 @Module({
   imports: [AuthModule, forwardRef(() => PaymentModule)],
   controllers: [RegistrationController],
-  providers: [RegistrationService, SeatService, QrTokenService, HoldSweeperJob],
+  providers: [
+    RegistrationService,
+    SeatService,
+    QrTokenService,
+    HoldSweeperJob,
+    RegistrationQueueService,
+    RegistrationQueueWorker,
+  ],
   exports: [RegistrationService, SeatService, QrTokenService],
 })
 export class RegistrationModule {}

@@ -4,12 +4,15 @@ import {
   Delete,
   Get,
   HttpCode,
+  HttpStatus,
   Param,
   ParseUUIDPipe,
   Post,
   Query,
+  Res,
   Sse,
 } from '@nestjs/common';
+import { Response } from 'express';
 import { Observable, interval, map, switchMap } from 'rxjs';
 import { Idempotent } from '../../common/decorators/idempotent.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -20,6 +23,7 @@ import { CreateRegistrationDto } from './dto/create-registration.dto';
 import { RegistrationService } from './registration.service';
 import { PrismaService } from '../../infra/prisma/prisma.service';
 import { PaymentGatewayClient } from '../payment/payment-gateway.client';
+import { RegistrationQueueService } from './registration-queue.service';
 
 @Controller()
 export class RegistrationController {
@@ -27,6 +31,7 @@ export class RegistrationController {
     private readonly svc: RegistrationService,
     private readonly prisma: PrismaService,
     private readonly paymentGateway: PaymentGatewayClient,
+    private readonly queue: RegistrationQueueService,
   ) {}
 
   /**
@@ -42,9 +47,26 @@ export class RegistrationController {
   })
   @Idempotent({ required: true, intentFields: ['workshopId'] })
   @Post('registrations')
-  async create(@Body() dto: CreateRegistrationDto, @CurrentUser() user: AuthenticatedUser) {
+  async create(
+    @Body() dto: CreateRegistrationDto,
+    @CurrentUser() user: AuthenticatedUser,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const paymentCircuitOpen = this.paymentGateway.isOpen();
+    const processNow = await this.queue.shouldProcessSynchronously();
+    if (!processNow) {
+      const queued = await this.queue.enqueue({
+        userId: user.id,
+        workshopId: dto.workshopId,
+        paymentCircuitOpen,
+      });
+      res.status(HttpStatus.ACCEPTED);
+      return queued.response;
+    }
+
+    res.status(HttpStatus.CREATED);
     const result = await this.svc.create(user.id, dto.workshopId, {
-      paymentCircuitOpen: this.paymentGateway.isOpen(),
+      paymentCircuitOpen,
     });
     return {
       regId: result.registration.id,
@@ -55,6 +77,26 @@ export class RegistrationController {
       qrToken: result.qrToken,
       qrImageDataUrl: result.qrImageDataUrl,
       paymentUnavailable: result.paymentUnavailable,
+    };
+  }
+
+  @Roles('STUDENT')
+  @Get('registrations/processing/:processingId')
+  async processingStatus(
+    @Param('processingId') processingId: string,
+    @CurrentUser() user: AuthenticatedUser,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const status = await this.queue.getStatusForUser(processingId, user.id);
+    res.status(status.httpStatus ?? (status.status === 'SUCCEEDED' ? HttpStatus.OK : HttpStatus.ACCEPTED));
+    return {
+      processingId: status.processingId,
+      status: status.status,
+      workshopId: status.workshopId,
+      queuedAt: status.queuedAt,
+      updatedAt: status.updatedAt,
+      result: status.response,
+      error: status.error,
     };
   }
 

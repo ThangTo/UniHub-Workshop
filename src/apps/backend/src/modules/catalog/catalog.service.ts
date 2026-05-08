@@ -266,27 +266,26 @@ export class CatalogService {
   async cancel(id: string, reason: string) {
     const w = await this.prisma.workshop.findUnique({ where: { id } });
     if (!w) throw new NotFoundException('workshop_not_found');
-
     const updated = await this.prisma.$transaction(async (tx) => {
       const u = await tx.workshop.update({
         where: { id },
         data: { status: 'CANCELLED', version: { increment: 1 } },
       });
 
-      // Cancel tất cả registration đang active
-      await tx.registration.updateMany({
-        where: {
-          workshopId: id,
-          status: { in: ['CONFIRMED', 'PENDING_PAYMENT'] },
-        },
-        data: { status: 'CANCELLED', cancelledAt: new Date() },
-      });
+      const activeRegs = await tx.$queryRaw<Array<{ id: string; studentId: string }>>(Prisma.sql`
+        UPDATE "registrations"
+        SET "status" = 'CANCELLED'::"registration_status",
+            "cancelled_at" = NOW()
+        WHERE "workshop_id" = ${id}::uuid
+          AND "status" IN ('CONFIRMED'::"registration_status", 'PENDING_PAYMENT'::"registration_status")
+        RETURNING "id"::text AS "id", "student_id"::text AS "studentId"
+      `);
 
       await this.outbox.append(tx, {
         aggregate: 'workshop',
         aggregateId: id,
         eventType: 'workshop.cancelled',
-        payload: { workshopId: id, reason },
+        payload: { workshopId: id, reason, registrations: activeRegs },
       });
 
       return u;

@@ -232,7 +232,18 @@ k6 load test requires `k6` installed and a prepared workshop/student token pool:
 WORKSHOP_ID=<published-workshop-id> TOKENS_FILE=./tokens.json pnpm demo:k6
 ```
 
-`scripts/k6/registration-load.js` treats `201`, `409`, and `429` as handled outcomes.
-It also reports that `202 queueId` is not currently implemented by the backend global registration queue.
+`scripts/k6/registration-load.js` treats `201`, `202`, `409`, `429`, and deliberate
+`503 registration_queue_full` capacity signals as handled outcomes.
+When the global registration threshold is exceeded, backend returns `202 QUEUED` with
+`processingId`; clients poll `GET /registrations/processing/{processingId}`.
+
+Refund hardening is also active: paid registration/workshop cancellation and late paid
+webhooks emit refund work, create `payment_refunds`, call Mock PG `/refund`, and mark
+payment `REFUNDED` when the gateway confirms success. If the circuit is open, refund
+rows stay `REQUESTED` for the retry job.
+
+Operational metrics are exposed at `GET /metrics` in Prometheus text format, including
+`registration_queue_size`, registration totals, check-in count, notification status
+counts, payment status counts, and unpublished outbox events.
 
 Manual offline check-in runbook: `scripts/demo/offline-checkin.md`.

@@ -22,11 +22,13 @@ import { AuthenticatedUser } from '../../common/types/auth.types';
 import { AppConfigService } from '../../common/config/app-config.service';
 import { InitiatePaymentDto } from './dto/initiate-payment.dto';
 import { PaymentService } from './payment.service';
+import { PaymentRefundService } from './payment-refund.service';
 
 @Controller()
 export class PaymentController {
   constructor(
     private readonly svc: PaymentService,
+    private readonly refunds: PaymentRefundService,
     private readonly cfg: AppConfigService,
   ) {}
 
@@ -85,7 +87,7 @@ export class PaymentController {
     },
   ) {
     if (!signature) throw new UnauthorizedException('missing_signature');
-    if (!body || !body.idempotencyKey) throw new BadRequestException('invalid_payload');
+    if (!body || !body.type) throw new BadRequestException('invalid_payload');
 
     // Recompute HMAC từ JSON-stringified body (mock-pg dùng JSON.stringify, không có whitespace canonicalization).
     // Cho production thực sự cần raw body — ở đây JSON.stringify rebuild đủ chính xác cho mock.
@@ -98,6 +100,17 @@ export class PaymentController {
       throw new UnauthorizedException('invalid_signature');
     }
 
+    if (body.type === 'refund.completed') {
+      await this.refunds.handleRefundWebhook(body as unknown as {
+        refundId: string;
+        chargeId: string;
+        status: 'SUCCESS' | 'FAILED' | 'PENDING';
+        amount: number;
+      });
+      return { ok: true };
+    }
+
+    if (!body.idempotencyKey) throw new BadRequestException('invalid_payload');
     await this.svc.handleWebhook(body);
     return { ok: true };
   }

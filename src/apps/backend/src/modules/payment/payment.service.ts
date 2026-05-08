@@ -211,8 +211,8 @@ export class PaymentService {
       this.logger.warn(`Webhook for unknown idempotencyKey=${payload.idempotencyKey}`);
       return;
     }
-    if (payment.status === PaymentStatus.SUCCESS) {
-      this.logger.debug(`Webhook ignored, payment ${payment.id} already SUCCESS`);
+    if (payment.status === PaymentStatus.SUCCESS || payment.status === PaymentStatus.REFUNDED) {
+      this.logger.debug(`Webhook ignored, payment ${payment.id} already ${payment.status}`);
       return;
     }
 

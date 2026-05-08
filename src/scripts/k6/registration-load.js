@@ -56,11 +56,19 @@ export default function (data) {
   );
 
   check(response, {
-    'handled response': (r) => [200, 201, 202, 409, 429].includes(r.status),
-    'no server error': (r) => r.status < 500,
+    'handled response': (r) => isHandledRegistrationResponse(r),
+    'no unexpected server error': (r) => r.status < 500 || isQueueFull(r),
   });
 
   sleep(0.01);
+}
+
+function isHandledRegistrationResponse(response) {
+  return [200, 201, 202, 409, 429].includes(response.status) || isQueueFull(response);
+}
+
+function isQueueFull(response) {
+  return response.status === 503 && String(response.body || '').includes('registration_queue_full');
 }
 
 export function handleSummary(data) {
@@ -68,7 +76,8 @@ export function handleSummary(data) {
   return {
     stdout:
       `\nRegistration load finished: ${statuses}\n` +
-      'Expected handled statuses: 201 success, 409 sold_out/already_registered, 429 rate_limited.\n' +
-      'If 202 responses are required by the grading rubric, note that the current backend does not implement the global registration queue yet.\n',
+      'Expected handled statuses: 201 success, 202 QUEUED under global overload, 409 sold_out/already_registered, 429 rate_limited.\n' +
+      'If RATE_LIMIT_REGQUEUE_MAX_ITEMS is intentionally exhausted, 503 registration_queue_full is treated as a handled capacity signal.\n' +
+      'Poll queued requests through GET /registrations/processing/{processingId}.\n',
   };
 }
