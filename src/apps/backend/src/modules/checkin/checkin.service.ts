@@ -1,4 +1,4 @@
-import { ForbiddenException, Injectable, Logger } from '@nestjs/common';
+import { ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { Prisma, RegistrationStatus } from '@prisma/client';
 import { PrismaService } from '../../infra/prisma/prisma.service';
 import { RedisService } from '../../infra/redis/redis.service';
@@ -58,7 +58,7 @@ export class CheckinService {
       },
     });
     if (!reg) {
-      throw new Error('registration_not_found');
+      throw new NotFoundException('registration_not_found');
     }
     if (!staff.roles.includes('SYS_ADMIN')) {
       const now = new Date();

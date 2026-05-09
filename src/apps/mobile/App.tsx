@@ -106,6 +106,7 @@ export default function App() {
   const [lastSyncMessage, setLastSyncMessage] = useState('No sync yet');
   const [permission, requestPermission] = useCameraPermissions();
   const syncingRef = useRef(false);
+  const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const pendingCount = useMemo(
     () => pending.filter((item) => item.synced === 0).length,
@@ -118,6 +119,7 @@ export default function App() {
 
   useEffect(() => {
     void bootstrap();
+    return () => clearSyncRetry();
   }, []);
 
   useEffect(() => {
@@ -255,6 +257,21 @@ export default function App() {
     } finally {
       setBusy(false);
     }
+  }
+
+  function clearSyncRetry() {
+    if (retryTimerRef.current) {
+      clearTimeout(retryTimerRef.current);
+      retryTimerRef.current = null;
+    }
+  }
+
+  function scheduleSyncRetry() {
+    if (retryTimerRef.current) return;
+    retryTimerRef.current = setTimeout(() => {
+      retryTimerRef.current = null;
+      void syncPending(true);
+    }, 30_000);
   }
 
   async function logout() {
@@ -396,7 +413,10 @@ export default function App() {
        ORDER BY created_at ASC
        LIMIT 100`,
     );
-    if (unsynced.length === 0) return;
+    if (unsynced.length === 0) {
+      clearSyncRetry();
+      return;
+    }
 
     syncingRef.current = true;
     setBusy(true);
@@ -435,10 +455,16 @@ export default function App() {
       await reloadPending();
       const message = `Sync: ${accepted.length} accepted, ${duplicates.length} duplicate, ${invalid.length} invalid`;
       setLastSyncMessage(message);
+      if (invalid.some((item) => item.result === 'unknown_error')) {
+        scheduleSyncRetry();
+      } else {
+        clearSyncRetry();
+      }
       if (!silent) Alert.alert('Sync complete', message);
     } catch (error) {
       const message = `${(error as Error).message}. Scans stay in SQLite and will retry.`;
       setLastSyncMessage(message);
+      scheduleSyncRetry();
       if (!silent) Alert.alert('Sync failed', message);
     } finally {
       syncingRef.current = false;

@@ -7,9 +7,11 @@ import {
   Param,
   ParseUUIDPipe,
   Post,
+  Res,
   UploadedFile,
   UseInterceptors,
 } from '@nestjs/common';
+import { Response } from 'express';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
@@ -46,12 +48,13 @@ export class AiSummaryController {
     @Param('id', ParseUUIDPipe) workshopId: string,
     @UploadedFile() file: UploadedPdf | undefined,
     @CurrentUser() user: AuthenticatedUser,
+    @Res({ passthrough: true }) res: Response,
   ) {
     if (!file) {
       throw new BadRequestException({ code: 'missing_file', message: 'Field "file" là bắt buộc.' });
     }
     const result = await this.summary.uploadPdf(workshopId, user.id, file);
-    // Cache hit → 200 READY; cache miss → 202 PENDING
+    res.status(result.summaryStatus === 'PENDING' ? HttpStatus.ACCEPTED : HttpStatus.OK);
     return result;
   }
 

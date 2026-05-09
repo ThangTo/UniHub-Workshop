@@ -297,6 +297,26 @@ export class CatalogService {
     return updated;
   }
 
+  async markEndedWorkshops(now = new Date()): Promise<number> {
+    const result = await this.prisma.workshop.updateMany({
+      where: {
+        status: WorkshopStatus.PUBLISHED,
+        endAt: { lte: now },
+      },
+      data: {
+        status: WorkshopStatus.ENDED,
+        version: { increment: 1 },
+      },
+    });
+
+    if (result.count > 0) {
+      this.logger.log(`Marked ${result.count} workshop(s) as ENDED`);
+      await this.invalidateCache();
+    }
+
+    return result.count;
+  }
+
   // ==================== SEATS ====================
   async getSeatsLeft(workshopId: string, capacity?: number): Promise<number> {
     try {

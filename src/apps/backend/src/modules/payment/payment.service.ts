@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   HttpException,
   Injectable,
@@ -8,7 +9,7 @@ import {
   ServiceUnavailableException,
   UnprocessableEntityException,
 } from '@nestjs/common';
-import { Payment, PaymentStatus, RegistrationStatus } from '@prisma/client';
+import { Payment, PaymentStatus, Prisma, RegistrationStatus } from '@prisma/client';
 import { v4 as uuid } from 'uuid';
 import { PrismaService } from '../../infra/prisma/prisma.service';
 import { OutboxService } from '../outbox/outbox.service';
@@ -89,23 +90,28 @@ export class PaymentService {
     if (lastAttempt?.status === PaymentStatus.SUCCESS) {
       throw new UnprocessableEntityException('already_paid');
     }
+    if (lastAttempt && this.isAttemptInFlight(lastAttempt.status)) {
+      throw new ConflictException({
+        code: 'payment_in_progress',
+        paymentId: lastAttempt.id,
+        status: lastAttempt.status,
+        retryAfterSec: 5,
+      });
+    }
     const attemptNo = (lastAttempt?.attemptNo ?? 0) + 1;
     const requestHash = idempotencyKey; // intent đơn giản: regId + amount khoá theo key
 
     // Fail-fast nếu CB đang Open
     if (this.gateway.isOpen()) {
-      const payment = await this.prisma.payment.create({
-        data: {
-          registrationId,
-          attemptNo,
-          amount: reg.feeAmount,
-          gateway: 'mock-pg',
-          status: PaymentStatus.FAILED,
-          idempotencyKey,
-          requestHash,
-          failureReason: 'circuit_open',
-          responseSnapshot: { code: 'payment_unavailable' },
-        },
+      const payment = await this.createPaymentAttempt({
+        registrationId,
+        attemptNo,
+        amount: reg.feeAmount,
+        status: PaymentStatus.FAILED,
+        idempotencyKey,
+        requestHash,
+        failureReason: 'circuit_open',
+        responseSnapshot: { code: 'payment_unavailable' },
       });
       throw new ServiceUnavailableException({
         code: 'payment_unavailable',
@@ -115,16 +121,13 @@ export class PaymentService {
     }
 
     // INSERT pending payment trước → đảm bảo có row dù gateway timeout
-    const payment = await this.prisma.payment.create({
-      data: {
-        registrationId,
-        attemptNo,
-        amount: reg.feeAmount,
-        gateway: 'mock-pg',
-        status: PaymentStatus.INITIATED,
-        idempotencyKey,
-        requestHash,
-      },
+    const payment = await this.createPaymentAttempt({
+      registrationId,
+      attemptNo,
+      amount: reg.feeAmount,
+      status: PaymentStatus.INITIATED,
+      idempotencyKey,
+      requestHash,
     });
 
     void this.audit.log({
@@ -380,5 +383,54 @@ export class PaymentService {
         payload: payload as Record<string, unknown>,
       });
     });
+  }
+
+  private isAttemptInFlight(status: PaymentStatus): boolean {
+    return (
+      status === PaymentStatus.INITIATED ||
+      status === PaymentStatus.PENDING ||
+      status === PaymentStatus.TIMEOUT
+    );
+  }
+
+  private async createPaymentAttempt(data: {
+    registrationId: string;
+    attemptNo: number;
+    amount: number;
+    status: PaymentStatus;
+    idempotencyKey: string;
+    requestHash: string;
+    failureReason?: string;
+    responseSnapshot?: object;
+  }): Promise<Payment> {
+    try {
+      return await this.prisma.payment.create({
+        data: {
+          registrationId: data.registrationId,
+          attemptNo: data.attemptNo,
+          amount: data.amount,
+          gateway: 'mock-pg',
+          status: data.status,
+          idempotencyKey: data.idempotencyKey,
+          requestHash: data.requestHash,
+          failureReason: data.failureReason,
+          responseSnapshot: data.responseSnapshot,
+        },
+      });
+    } catch (e) {
+      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
+        const current = await this.prisma.payment.findFirst({
+          where: { registrationId: data.registrationId },
+          orderBy: { attemptNo: 'desc' },
+        });
+        throw new ConflictException({
+          code: 'payment_in_progress',
+          paymentId: current?.id,
+          status: current?.status,
+          retryAfterSec: 5,
+        });
+      }
+      throw e;
+    }
   }
 }
