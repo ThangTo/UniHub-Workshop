@@ -22,6 +22,7 @@ const ROUTING_KEYS = [
   'payment.failed',
   'workshop.cancelled',
   'checkin.confirmed',
+  'csv.import_failed',
 ];
 
 /**
@@ -39,6 +40,10 @@ export class NotificationWorker implements OnModuleInit {
   ) {}
 
   async onModuleInit(): Promise<void> {
+    void this.bindConsumer();
+  }
+
+  private async bindConsumer(): Promise<void> {
     // Đợi AMQP module init (channel sẵn sàng) — retry vài lần
     for (let i = 0; i < 30; i++) {
       try {
@@ -250,6 +255,36 @@ export class NotificationWorker implements OnModuleInit {
               userName: user.fullName,
               workshopTitle: ws.title,
               reason: reason ?? 'Không ghi nhận',
+            },
+          });
+        }
+        return;
+      }
+      case 'csv.import_failed': {
+        const { jobId, fileName, reason } = evt.payload as {
+          jobId?: string;
+          fileName?: string;
+          reason?: string;
+        };
+        const admins = await this.prisma.user.findMany({
+          where: { roles: { some: { role: { name: 'SYS_ADMIN' } } } },
+          select: { id: true, fullName: true },
+        });
+        if (admins.length === 0) return;
+        const job = jobId
+          ? await this.prisma.importJob.findUnique({ where: { id: jobId } })
+          : null;
+        for (const admin of admins) {
+          await this.notif.dispatch({
+            eventId: evt.id,
+            userId: admin.id,
+            templateId: 'csv_import_failed',
+            vars: {
+              userName: admin.fullName,
+              jobId: job?.id ?? jobId ?? evt.aggregateId,
+              fileName: job?.fileName ?? fileName ?? 'unknown.csv',
+              reason: reason ?? 'unknown',
+              failedAt: (job?.finishedAt ?? new Date(evt.createdAt)).toLocaleString('vi-VN'),
             },
           });
         }

@@ -24,17 +24,30 @@ export class PaymentRefundWorker implements OnModuleInit {
   ) {}
 
   async onModuleInit(): Promise<void> {
-    for (let i = 0; i < 30; i++) {
+    void this.bindConsumer();
+  }
+
+  private async bindConsumer(): Promise<void> {
+    let lastError: Error | undefined;
+    for (let i = 0; i < 120; i++) {
       try {
         await this.amqp.assertConsumer(QUEUE, ROUTING_KEYS);
         await this.amqp.consume<OutboxEnvelope>(QUEUE, (evt) => this.handle(evt), { prefetch: 4 });
-        this.logger.log(`Consuming ${QUEUE} ← ${ROUTING_KEYS.join(',')}`);
+        this.logger.log(`Consuming ${QUEUE} <- ${ROUTING_KEYS.join(',')}`);
         return;
-      } catch {
+      } catch (e) {
+        lastError = e as Error;
+        if (i === 0 || i === 9 || i === 29 || i === 59 || i === 119) {
+          this.logger.warn(
+            `Payment refund consumer bind retry ${i + 1}/120 failed: ${lastError.message}`,
+          );
+        }
         await new Promise((r) => setTimeout(r, 500));
       }
     }
-    this.logger.error('Failed to bind payment refund consumer after retries');
+    this.logger.error(
+      `Failed to bind payment refund consumer after retries: ${lastError?.message ?? 'unknown error'}`,
+    );
   }
 
   private async handle(evt: OutboxEnvelope): Promise<void> {
@@ -57,7 +70,9 @@ export class PaymentRefundWorker implements OnModuleInit {
       case 'workshop.cancelled': {
         const { workshopId, reason } = evt.payload as { workshopId: string; reason?: string };
         const count = await this.refunds.refundWorkshop(workshopId, reason ?? 'workshop_cancelled');
-        if (count > 0) this.logger.log(`Triggered ${count} refund(s) for cancelled workshop=${workshopId}`);
+        if (count > 0) {
+          this.logger.log(`Triggered ${count} refund(s) for cancelled workshop=${workshopId}`);
+        }
         return;
       }
       default:

@@ -78,6 +78,7 @@ export class IdempotencyInterceptor implements NestInterceptor {
       if (snap.completed) {
         this.logger.debug(`Idempotency replay key=${key}`);
         res.status(snap.status_code);
+        void this.recordReplay();
         return of(snap.response_body);
       }
       // Chưa completed → đợi ngắn rồi check lại (tối đa 3 lần × 100ms)
@@ -102,6 +103,7 @@ export class IdempotencyInterceptor implements NestInterceptor {
           completed: true,
         }, ttl);
         res.status(dbSnap.statusCode);
+        void this.recordReplay();
         return of(dbSnap.responseBody);
       }
     }
@@ -195,6 +197,7 @@ export class IdempotencyInterceptor implements NestInterceptor {
       }
       if (snap.completed) {
         res.status(snap.status_code);
+        void this.recordReplay();
         return of(snap.response_body);
       }
     }
@@ -242,6 +245,14 @@ export class IdempotencyInterceptor implements NestInterceptor {
 
   private sleep(ms: number): Promise<void> {
     return new Promise((r) => setTimeout(r, ms));
+  }
+
+  private async recordReplay(): Promise<void> {
+    try {
+      await this.redis.getClient().incr('metrics:idempotency_replay_total');
+    } catch {
+      // metrics are best effort
+    }
   }
 }
 

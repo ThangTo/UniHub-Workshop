@@ -61,6 +61,17 @@ export class AmqpService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  private async waitForChannel(timeoutMs = 60_000): Promise<amqp.ConfirmChannel> {
+    const startedAt = Date.now();
+    while (!this.channel) {
+      if (Date.now() - startedAt > timeoutMs) {
+        throw new Error('AMQP channel not ready');
+      }
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+    return this.channel;
+  }
+
   /**
    * Publish event với routing key. Đợi confirm trước khi resolve để đảm bảo broker nhận.
    */
@@ -69,12 +80,10 @@ export class AmqpService implements OnModuleInit, OnModuleDestroy {
     payload: unknown,
     headers: Record<string, string> = {},
   ): Promise<void> {
-    if (!this.channel) {
-      throw new Error('AMQP channel not ready');
-    }
+    const channel = await this.waitForChannel();
     const buf = Buffer.from(JSON.stringify(payload));
     await new Promise<void>((resolve, reject) => {
-      this.channel!.publish(
+      channel.publish(
         AmqpService.EXCHANGE,
         routingKey,
         buf,
@@ -88,10 +97,10 @@ export class AmqpService implements OnModuleInit, OnModuleDestroy {
    * Đảm bảo queue tồn tại + bind vào exchange. Idempotent.
    */
   async assertConsumer(queue: string, routingKeys: string[]): Promise<void> {
-    if (!this.channel) throw new Error('AMQP channel not ready');
-    await this.channel.assertQueue(queue, { durable: true });
+    const channel = await this.waitForChannel();
+    await channel.assertQueue(queue, { durable: true });
     for (const key of routingKeys) {
-      await this.channel.bindQueue(queue, AmqpService.EXCHANGE, key);
+      await channel.bindQueue(queue, AmqpService.EXCHANGE, key);
     }
   }
 
@@ -105,17 +114,17 @@ export class AmqpService implements OnModuleInit, OnModuleDestroy {
     handler: (payload: T, raw: amqp.ConsumeMessage) => Promise<void>,
     opts: { prefetch?: number } = {},
   ): Promise<void> {
-    if (!this.channel) throw new Error('AMQP channel not ready');
-    await this.channel.prefetch(opts.prefetch ?? 16);
-    await this.channel.consume(queue, async (msg) => {
+    const channel = await this.waitForChannel();
+    await channel.prefetch(opts.prefetch ?? 16);
+    await channel.consume(queue, async (msg) => {
       if (!msg) return;
       try {
         const payload = JSON.parse(msg.content.toString('utf8')) as T;
         await handler(payload, msg);
-        this.channel?.ack(msg);
+        channel.ack(msg);
       } catch (e) {
         this.logger.error(`Consumer error on ${queue}: ${(e as Error).message}`);
-        this.channel?.nack(msg, false, false);
+        channel.nack(msg, false, false);
       }
     });
   }

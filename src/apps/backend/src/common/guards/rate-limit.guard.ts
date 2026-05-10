@@ -49,6 +49,7 @@ return { allowed, math.floor(tokens), retry_after }
 @Injectable()
 export class RateLimitGuard implements CanActivate {
   private readonly logger = new Logger(RateLimitGuard.name);
+  private readonly memoryBuckets = new Map<string, { tokens: number; lastRefill: number }>();
 
   constructor(
     private readonly reflector: Reflector,
@@ -94,24 +95,37 @@ export class RateLimitGuard implements CanActivate {
 
       if (!allowed) {
         res.setHeader('Retry-After', retryAfter);
+        void this.incrementMetric('rejected', opts.scope);
         throw new HttpException(
           { code: 'rate_limited', message: 'Too many requests', retryAfter },
           HttpStatus.TOO_MANY_REQUESTS,
         );
       }
 
+      void this.incrementMetric('allowed', opts.scope);
       return true;
     } catch (e) {
       if (e instanceof HttpException) throw e;
       // Redis down fallback
       this.logger.warn(`Rate limit Redis error: ${(e as Error).message}`);
-      if (opts.failClosed) {
+      const fallback = this.consumeMemoryBucket(key, opts, cost, nowMs);
+      res.setHeader('X-RateLimit-Limit', opts.capacity);
+      res.setHeader('X-RateLimit-Remaining', Math.max(0, Math.floor(fallback.remaining)));
+
+      if (!fallback.allowed) {
+        res.setHeader('Retry-After', fallback.retryAfter);
+        void this.incrementMetric('rejected', opts.scope);
         throw new HttpException(
-          { code: 'rate_limited', message: 'Service temporarily unavailable' },
+          {
+            code: 'rate_limited',
+            message: opts.failClosed ? 'Service temporarily unavailable' : 'Too many requests',
+            retryAfter: fallback.retryAfter,
+          },
           HttpStatus.TOO_MANY_REQUESTS,
         );
       }
-      // fail-open cho read endpoints (catalog)
+
+      void this.incrementMetric('allowed', opts.scope);
       return true;
     }
   }
@@ -120,5 +134,40 @@ export class RateLimitGuard implements CanActivate {
     const forwarded = req.headers['x-forwarded-for'];
     if (typeof forwarded === 'string') return forwarded.split(',')[0].trim();
     return req.ip ?? req.socket.remoteAddress ?? 'unknown';
+  }
+
+  private consumeMemoryBucket(
+    key: string,
+    opts: RateLimitOptions,
+    cost: number,
+    nowMs: number,
+  ): { allowed: boolean; remaining: number; retryAfter: number } {
+    const current = this.memoryBuckets.get(key) ?? {
+      tokens: opts.capacity,
+      lastRefill: nowMs,
+    };
+    const elapsed = Math.max(0, (nowMs - current.lastRefill) / 1000);
+    const tokens = Math.min(opts.capacity, current.tokens + elapsed * opts.refillPerSec);
+
+    if (this.memoryBuckets.size > 10_000) this.memoryBuckets.clear();
+
+    if (tokens < cost) {
+      const refill = Math.max(opts.refillPerSec, 0.000001);
+      const retryAfter = Math.ceil((cost - tokens) / refill);
+      this.memoryBuckets.set(key, { tokens, lastRefill: nowMs });
+      return { allowed: false, remaining: tokens, retryAfter };
+    }
+
+    const remaining = tokens - cost;
+    this.memoryBuckets.set(key, { tokens: remaining, lastRefill: nowMs });
+    return { allowed: true, remaining, retryAfter: 0 };
+  }
+
+  private async incrementMetric(kind: 'allowed' | 'rejected', scope: string): Promise<void> {
+    try {
+      await this.redis.getClient().incr(`metrics:rate_limit_${kind}:${scope}`);
+    } catch {
+      // best effort only
+    }
   }
 }

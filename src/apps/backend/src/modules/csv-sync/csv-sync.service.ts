@@ -6,6 +6,7 @@ import * as path from 'path';
 import { parse } from 'csv-parse';
 import { PrismaService } from '../../infra/prisma/prisma.service';
 import { AppConfigService } from '../../common/config/app-config.service';
+import { OutboxService } from '../outbox/outbox.service';
 
 /**
  * Specs/csv-sync.md — đồng bộ sinh viên từ CSV legacy.
@@ -80,6 +81,7 @@ export class CsvSyncService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly config: AppConfigService,
+    private readonly outbox: OutboxService,
   ) {}
 
   /**
@@ -477,7 +479,7 @@ export class CsvSyncService {
     reason: string,
     extra?: Record<string, unknown>,
   ): Promise<void> {
-    await this.prisma.importJob
+    const job = await this.prisma.importJob
       .update({
         where: { id: jobId },
         data: {
@@ -486,7 +488,31 @@ export class CsvSyncService {
           errorLog: { reason, ...extra } as unknown as Prisma.InputJsonValue,
         },
       })
-      .catch((e) => this.logger.warn(`failJob update failed: ${(e as Error).message}`));
+      .catch((e) => {
+        this.logger.warn(`failJob update failed: ${(e as Error).message}`);
+        return null;
+      });
+
+    if (!job) return;
+
+    await this.prisma
+      .$transaction((tx) =>
+        this.outbox.append(tx, {
+          aggregate: 'import_job',
+          aggregateId: job.id,
+          eventType: 'csv.import_failed',
+          payload: {
+            jobId: job.id,
+            fileName: job.fileName,
+            fileSha256: job.fileSha256,
+            reason,
+            ...extra,
+          },
+        }),
+      )
+      .catch((e) =>
+        this.logger.warn(`csv.import_failed outbox append failed: ${(e as Error).message}`),
+      );
   }
 
   private async moveFile(src: string, destDir: string): Promise<void> {

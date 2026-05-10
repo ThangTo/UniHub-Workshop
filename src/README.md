@@ -89,6 +89,14 @@ Phase 8 demo/load scripts are committed under `scripts/demo/` and `scripts/k6/`:
 - Offline check-in runbook: `scripts/demo/offline-checkin.md`.
 - k6 registration load: `pnpm demo:k6` with `WORKSHOP_ID` and either `STUDENT_TOKEN` or `TOKENS_FILE`.
 
+## Test runbooks
+
+Detailed test guides for grading/demo are in `docs/`:
+
+- `docs/TESTING_WEB_API.md` - full Docker stack, backend API, Student Web, Admin Web, AI summary, CSV sync.
+- `docs/TESTING_MOBILE_EXPO.md` - Expo mobile check-in guide from zero, including physical phone/emulator setup and offline queue scenarios.
+- `docs/TESTING_DEMO_SCRIPTS.md` - race condition, idempotency, k6 load, smoke scripts, and evidence checklist.
+
 ## Phát triển
 
 ```bash

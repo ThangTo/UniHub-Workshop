@@ -320,7 +320,14 @@ export default function App() {
     setQrToken('');
     setScannerOpen(false);
     await reloadPending();
-    setLastSyncMessage(`Queued ${payload.regId.slice(0, 8)} at ${new Date(scannedAt).toLocaleTimeString()}`);
+    const queueMessage = `Queued ${payload.regId.slice(0, 8)} at ${new Date(scannedAt).toLocaleTimeString()}`;
+    setLastSyncMessage(queueMessage);
+    if (isOnline === false) {
+      Alert.alert(
+        'Offline scan queued',
+        'QR signature is valid and the scan is saved locally. Room assignment will be checked when sync runs.',
+      );
+    }
 
     if (auth && isOnline) {
       void syncPending(true);
@@ -374,6 +381,14 @@ export default function App() {
         }
         return true;
       }
+      const code = String(body?.code ?? body?.message ?? 'verify_failed');
+      if (code === 'not_assigned' || code === 'wrong_room') {
+        return confirmAsync(
+          'Room assignment warning',
+          'This staff account is not assigned to the workshop room for this QR. Queue anyway?',
+          'Queue anyway',
+        );
+      }
       return confirmAsync(
         'Assignment warning',
         `${body?.message ?? body?.code ?? 'verify_failed'}\nQueue scan anyway?`,
@@ -421,7 +436,7 @@ export default function App() {
     syncingRef.current = true;
     setBusy(true);
     try {
-      const batchKey = await Crypto.randomUUID();
+      const batchKey = await stableBatchKey(unsynced);
       const res = await fetch(`${apiBaseUrl.replace(/\/$/, '')}/checkin/batch`, {
         method: 'POST',
         headers: {
@@ -455,12 +470,22 @@ export default function App() {
       await reloadPending();
       const message = `Sync: ${accepted.length} accepted, ${duplicates.length} duplicate, ${invalid.length} invalid`;
       setLastSyncMessage(message);
+      const assignmentWarnings = invalid.filter((item) => (
+        item.result === 'not_assigned' || item.result === 'wrong_room'
+      ));
       if (invalid.some((item) => item.result === 'unknown_error')) {
         scheduleSyncRetry();
       } else {
         clearSyncRetry();
       }
-      if (!silent) Alert.alert('Sync complete', message);
+      if (!silent) {
+        Alert.alert(
+          assignmentWarnings.length > 0 ? 'Sync complete with assignment warnings' : 'Sync complete',
+          assignmentWarnings.length > 0
+            ? `${message}\n${assignmentWarnings.length} scan(s) are not assigned to this staff/room.`
+            : message,
+        );
+      }
     } catch (error) {
       const message = `${(error as Error).message}. Scans stay in SQLite and will retry.`;
       setLastSyncMessage(message);
@@ -483,6 +508,14 @@ export default function App() {
         item.message ?? null,
         item.idempotencyKey,
       ],
+    );
+  }
+
+  async function stableBatchKey(items: PendingScan[]): Promise<string> {
+    const canonical = items.map((item) => item.idempotencyKey).join('|');
+    return Crypto.digestStringAsync(
+      Crypto.CryptoDigestAlgorithm.SHA256,
+      `checkin-batch:${canonical}`,
     );
   }
 

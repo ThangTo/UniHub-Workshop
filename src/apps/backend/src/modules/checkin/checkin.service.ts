@@ -105,6 +105,7 @@ export class CheckinService {
    * Trả {accepted, duplicates, invalid} — partial success cho phép app retry phần còn lại.
    */
   async batch(staff: AuthenticatedUser, dto: BatchCheckinDto): Promise<BatchCheckinResponse> {
+    const startedAt = Date.now();
     const accepted: CheckinItemResult[] = [];
     const duplicates: CheckinItemResult[] = [];
     const invalid: CheckinItemResult[] = [];
@@ -134,6 +135,12 @@ export class CheckinService {
         duplicates: duplicates.length,
         invalid: invalid.length,
       },
+    });
+    void this.recordBatchMetrics({
+      accepted: accepted.length,
+      duplicate: duplicates.length,
+      invalid: invalid.length,
+      durationMs: Date.now() - startedAt,
     });
 
     return { accepted, duplicates, invalid };
@@ -277,6 +284,26 @@ export class CheckinService {
         result: 'unknown_error',
         message: (e as Error).message,
       };
+    }
+  }
+
+  private async recordBatchMetrics(metrics: {
+    accepted: number;
+    duplicate: number;
+    invalid: number;
+    durationMs: number;
+  }): Promise<void> {
+    try {
+      await this.redis
+        .getClient()
+        .multi()
+        .incrby('metrics:checkin_total:accepted', metrics.accepted)
+        .incrby('metrics:checkin_total:duplicate', metrics.duplicate)
+        .incrby('metrics:checkin_total:invalid', metrics.invalid)
+        .set('metrics:checkin_sync_duration_ms', metrics.durationMs)
+        .exec();
+    } catch {
+      // metrics are best effort
     }
   }
 }

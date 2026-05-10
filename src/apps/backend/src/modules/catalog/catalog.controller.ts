@@ -20,25 +20,10 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RateLimit } from '../../common/decorators/rate-limit.decorator';
 import { AuthenticatedUser } from '../../common/types/auth.types';
 
-/**
- * Catalog endpoints theo specs/workshop-catalog.md.
- *
- * Public:
- *   GET  /workshops          — danh sách PUBLISHED (cache 5 phút)
- *   GET  /workshops/:id      — chi tiết 1 workshop
- *   SSE  /workshops/stream   — real-time seatsLeft mỗi 2 giây
- *
- * ORGANIZER:
- *   POST  /workshops                — tạo DRAFT
- *   POST  /workshops/:id/publish    — DRAFT → PUBLISHED
- *   PATCH /workshops/:id            — sửa (optimistic lock If-Match)
- *   POST  /workshops/:id/cancel     — huỷ
- */
 @Controller('workshops')
 export class CatalogController {
   constructor(private readonly catalog: CatalogService) {}
 
-  // ==================== PUBLIC ====================
   @Public()
   @RateLimit({ scope: 'ip', bucket: 'site', capacity: 60, refillPerSec: 0.5 })
   @Get()
@@ -58,10 +43,9 @@ export class CatalogController {
   @Get('stream')
   @Sse()
   seatStream(): Observable<MessageEvent> {
-    // Gửi seatsLeft cho tất cả PUBLISHED workshops mỗi 2 giây
     return interval(2000).pipe(
       switchMap(() =>
-        from(this.getAllSeats()).pipe(
+        from(this.catalog.publishedSeatSnapshot()).pipe(
           map((seats) => ({ data: seats }) as MessageEvent),
         ),
       ),
@@ -71,6 +55,7 @@ export class CatalogController {
   @Roles('ORGANIZER', 'SYS_ADMIN')
   @Get('admin/list')
   async adminList(
+    @CurrentUser() user: AuthenticatedUser,
     @Query('page') page?: string,
     @Query('limit') limit?: string,
     @Query('status') status?: string,
@@ -84,7 +69,16 @@ export class CatalogController {
       page: page ? parseInt(page, 10) : undefined,
       limit: limit ? parseInt(limit, 10) : undefined,
       status: normalizedStatus,
-    });
+    }, user);
+  }
+
+  @Roles('ORGANIZER', 'SYS_ADMIN')
+  @Get('admin/:id')
+  async adminDetail(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.catalog.adminDetail(id, user);
   }
 
   @Public()
@@ -93,7 +87,6 @@ export class CatalogController {
     return this.catalog.detail(id);
   }
 
-  // ==================== ORGANIZER ====================
   @Roles('ORGANIZER', 'SYS_ADMIN')
   @Post()
   async create(@Body() dto: CreateWorkshopDto, @CurrentUser() user: AuthenticatedUser) {
@@ -102,8 +95,11 @@ export class CatalogController {
 
   @Roles('ORGANIZER', 'SYS_ADMIN')
   @Post(':id/publish')
-  async publish(@Param('id', ParseUUIDPipe) id: string) {
-    return this.catalog.publish(id);
+  async publish(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.catalog.publish(id, user);
   }
 
   @Roles('ORGANIZER', 'SYS_ADMIN')
@@ -111,37 +107,20 @@ export class CatalogController {
   async update(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateWorkshopDto,
+    @CurrentUser() user: AuthenticatedUser,
     @Headers('if-match') ifMatch?: string,
   ) {
     const version = ifMatch ? parseInt(ifMatch.replace(/[^0-9]/g, ''), 10) : 0;
-    return this.catalog.update(id, dto, version);
+    return this.catalog.update(id, dto, version, user);
   }
 
   @Roles('ORGANIZER', 'SYS_ADMIN')
   @Post(':id/cancel')
   async cancel(
     @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: AuthenticatedUser,
     @Body('reason') reason?: string,
   ) {
-    return this.catalog.cancel(id, reason ?? 'No reason provided');
-  }
-
-  // ==================== SSE helper ====================
-  private async getAllSeats(): Promise<Record<string, number>> {
-    // Lấy tất cả PUBLISHED workshop ids rồi đọc seat counter
-    // Trong production nên cache danh sách ids, ở đây đơn giản.
-    try {
-      const keys = await this.catalog['redis'].getClient().keys('seat:*');
-      if (keys.length === 0) return {};
-      const vals = await this.catalog['redis'].getClient().mget(...keys);
-      const result: Record<string, number> = {};
-      keys.forEach((k, i) => {
-        const id = k.replace('seat:', '');
-        result[id] = Math.max(0, parseInt(vals[i] ?? '0', 10));
-      });
-      return result;
-    } catch {
-      return {};
-    }
+    return this.catalog.cancel(id, reason ?? 'No reason provided', user);
   }
 }

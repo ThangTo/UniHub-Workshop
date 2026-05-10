@@ -27,6 +27,17 @@ const RAW_TEMPLATES: Record<string, TemplateDef> = {
       '<p>Vui lòng giữ QR check-in trong tài khoản UniHub.</p>',
     defaultChannels: ['EMAIL', 'IN_APP'],
   },
+  registration_hold_created: {
+    subject: 'Giu ghe thanh cong cho workshop "{{workshopTitle}}"',
+    text: 'Chao {{userName}},\n\nHe thong da giu ghe cho workshop "{{workshopTitle}}". Phi tham du: {{fee}} VND. Vui long hoan tat thanh toan truoc {{holdExpiresAt}}.\n\nPhong: {{roomName}}\nMa dang ky: {{regId}}',
+    html:
+      '<p>Chao <b>{{userName}}</b>,</p>' +
+      '<p>He thong da giu ghe cho workshop <b>"{{workshopTitle}}"</b>.</p>' +
+      '<p>Phi tham du: <b>{{fee}} VND</b>. Vui long hoan tat thanh toan truoc <b>{{holdExpiresAt}}</b>.</p>' +
+      '<p>Phong: <b>{{roomName}}</b></p>' +
+      '<p>Ma dang ky: <code>{{regId}}</code></p>',
+    defaultChannels: ['EMAIL', 'IN_APP'],
+  },
   payment_succeeded: {
     subject: '💳 Thanh toán workshop "{{workshopTitle}}" thành công',
     text: 'Chào {{userName}},\n\nThanh toán {{amount}} VND cho workshop "{{workshopTitle}}" đã thành công.\nMã giao dịch: {{gatewayTxnId}}',
@@ -70,6 +81,26 @@ const RAW_TEMPLATES: Record<string, TemplateDef> = {
       '<p>Chào <b>{{userName}}</b>,</p>' +
       '<p>Bạn vừa huỷ đăng ký workshop <b>"{{workshopTitle}}"</b>.</p>' +
       '{{#if refundRequired}}<p>Hệ thống sẽ tự hoàn tiền trong 1-3 ngày làm việc.</p>{{/if}}',
+    defaultChannels: ['EMAIL', 'IN_APP'],
+  },
+  workshop_cancelled: {
+    subject: 'Workshop "{{workshopTitle}}" da bi huy',
+    text: 'Chao {{userName}},\n\nWorkshop "{{workshopTitle}}" da bi huy.\nLy do: {{reason}}\n\nNeu ban da thanh toan, he thong se xu ly hoan tien theo chinh sach.',
+    html:
+      '<p>Chao <b>{{userName}}</b>,</p>' +
+      '<p>Workshop <b>"{{workshopTitle}}"</b> da bi huy.</p>' +
+      '<p>Ly do: <i>{{reason}}</i></p>' +
+      '<p>Neu ban da thanh toan, he thong se xu ly hoan tien theo chinh sach.</p>',
+    defaultChannels: ['EMAIL', 'IN_APP'],
+  },
+  csv_import_failed: {
+    subject: 'CSV import failed: {{fileName}}',
+    text: 'CSV import job {{jobId}} failed.\nFile: {{fileName}}\nReason: {{reason}}\nFailed at: {{failedAt}}',
+    html:
+      '<p>CSV import job <code>{{jobId}}</code> failed.</p>' +
+      '<p>File: <b>{{fileName}}</b></p>' +
+      '<p>Reason: <code>{{reason}}</code></p>' +
+      '<p>Failed at: {{failedAt}}</p>',
     defaultChannels: ['EMAIL', 'IN_APP'],
   },
 };

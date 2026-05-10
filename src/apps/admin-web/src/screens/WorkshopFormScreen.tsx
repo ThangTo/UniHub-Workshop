@@ -26,7 +26,7 @@ export function WorkshopFormScreen({ mode }: { mode: 'create' | 'edit' }) {
     if (mode !== 'edit' || !id) return;
     let cancelled = false;
     api
-      .get<WorkshopSummary>(`/workshops/${id}`)
+      .get<WorkshopSummary>(`/workshops/admin/${id}`)
       .then((r) => {
         if (cancelled) return;
         setForm({

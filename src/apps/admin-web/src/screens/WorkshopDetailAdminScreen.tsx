@@ -19,7 +19,7 @@ export function WorkshopDetailAdminScreen() {
 
     async function load() {
       try {
-        const r = await api.get<WorkshopSummary>(`/workshops/${id}`);
+        const r = await api.get<WorkshopSummary>(`/workshops/admin/${id}`);
         if (cancelled) return;
         setW(r.data);
         if (r.data.summaryStatus === 'PENDING') {
@@ -41,7 +41,7 @@ export function WorkshopDetailAdminScreen() {
     setBusy('publish');
     try {
       await api.post(`/workshops/${id}/publish`);
-      const r = await api.get<WorkshopSummary>(`/workshops/${id}`);
+      const r = await api.get<WorkshopSummary>(`/workshops/admin/${id}`);
       setW(r.data);
     } catch (e) {
       alert(apiError(e, 'Publish thất bại.'));
@@ -57,7 +57,7 @@ export function WorkshopDetailAdminScreen() {
     setBusy('cancel');
     try {
       await api.post(`/workshops/${id}/cancel`, { reason });
-      const r = await api.get<WorkshopSummary>(`/workshops/${id}`);
+      const r = await api.get<WorkshopSummary>(`/workshops/admin/${id}`);
       setW(r.data);
     } catch (e) {
       alert(apiError(e, 'Huỷ thất bại.'));
@@ -76,7 +76,7 @@ export function WorkshopDetailAdminScreen() {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
       // Refresh — trạng thái sẽ thành PENDING (cache miss) hoặc READY (cache hit)
-      const r = await api.get<WorkshopSummary>(`/workshops/${id}`);
+      const r = await api.get<WorkshopSummary>(`/workshops/admin/${id}`);
       setW(r.data);
     } catch (e) {
       alert(apiError(e, 'Upload PDF thất bại.'));
@@ -91,7 +91,7 @@ export function WorkshopDetailAdminScreen() {
     setBusy('retry');
     try {
       await api.post(`/workshops/${id}/summary/retry`);
-      const r = await api.get<WorkshopSummary>(`/workshops/${id}`);
+      const r = await api.get<WorkshopSummary>(`/workshops/admin/${id}`);
       setW(r.data);
     } catch (e) {
       alert(apiError(e, 'Retry thất bại.'));

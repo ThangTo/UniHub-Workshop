@@ -50,6 +50,10 @@ export class AiSummaryWorker implements OnModuleInit {
   ) {}
 
   async onModuleInit(): Promise<void> {
+    void this.bindConsumer();
+  }
+
+  private async bindConsumer(): Promise<void> {
     for (let i = 0; i < 30; i++) {
       try {
         await this.amqp.assertConsumer(QUEUE, [ROUTING_KEY]);
@@ -67,6 +71,7 @@ export class AiSummaryWorker implements OnModuleInit {
 
   private async handle(evt: OutboxEnvelope): Promise<void> {
     const { workshopId, objectKey, sha } = evt.payload;
+    const startedAt = Date.now();
     this.logger.log(`AI summary start workshop=${workshopId} sha=${sha.slice(0, 12)}`);
 
     // 1. Fetch PDF từ MinIO
@@ -135,6 +140,7 @@ export class AiSummaryWorker implements OnModuleInit {
       this.logger.log(
         `AI summary READY workshop=${workshopId} words=${result.summary.split(/\s+/).length}`,
       );
+      await this.recordDuration(startedAt);
     } catch (e) {
       if (e instanceof AiProviderError) {
         await this.markFailed(workshopId, e.message);
@@ -164,6 +170,7 @@ export class AiSummaryWorker implements OnModuleInit {
           `markFailed update failed workshop=${workshopId}: ${(e as Error).message}`,
         ),
       );
+    await this.incrementFailureMetric();
   }
 
   /**
@@ -191,5 +198,27 @@ export class AiSummaryWorker implements OnModuleInit {
       .map((l) => l.replace(/\s+/g, ' ').trim())
       .filter((l) => l.length >= 3);
     return lines.join('\n').trim();
+  }
+
+  private async incrementFailureMetric(): Promise<void> {
+    try {
+      await this.redis.getClient().incr('metrics:ai_summary_failures_total');
+    } catch {
+      // metrics are best effort
+    }
+  }
+
+  private async recordDuration(startedAt: number): Promise<void> {
+    try {
+      const seconds = Math.max(0, (Date.now() - startedAt) / 1000);
+      const client = this.redis.getClient();
+      await client
+        .multi()
+        .incrbyfloat('metrics:ai_summary_duration_seconds_sum', seconds)
+        .incr('metrics:ai_summary_duration_seconds_count')
+        .exec();
+    } catch {
+      // metrics are best effort
+    }
   }
 }

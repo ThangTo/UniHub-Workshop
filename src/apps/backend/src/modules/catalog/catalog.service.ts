@@ -1,5 +1,6 @@
 import {
   ConflictException,
+  ForbiddenException,
   Injectable,
   Logger,
   NotFoundException,
@@ -9,8 +10,10 @@ import { Prisma, WorkshopStatus } from '@prisma/client';
 import { PrismaService } from '../../infra/prisma/prisma.service';
 import { RedisService } from '../../infra/redis/redis.service';
 import { OutboxService } from '../outbox/outbox.service';
+import { AuditService } from '../audit/audit.service';
 import { CreateWorkshopDto } from './dto/create-workshop.dto';
 import { UpdateWorkshopDto } from './dto/update-workshop.dto';
+import { AuthenticatedUser } from '../../common/types/auth.types';
 
 const CACHE_TTL = 300; // 5 phút
 const CACHE_PREFIX = 'cache:workshop';
@@ -30,6 +33,7 @@ export class CatalogService {
     private readonly prisma: PrismaService,
     private readonly redis: RedisService,
     private readonly outbox: OutboxService,
+    private readonly audit: AuditService,
   ) {}
 
   // ==================== PUBLIC READ ====================
@@ -85,13 +89,17 @@ export class CatalogService {
     return result;
   }
 
-  async adminList(filters: { page?: number; limit?: number; status?: WorkshopStatus }) {
+  async adminList(
+    filters: { page?: number; limit?: number; status?: WorkshopStatus },
+    user: AuthenticatedUser,
+  ) {
     const page = filters.page ?? 1;
     const limit = Math.min(filters.limit ?? 50, 100);
     const skip = (page - 1) * limit;
     const where: Prisma.WorkshopWhereInput = {};
 
     if (filters.status) where.status = filters.status;
+    if (!user.roles.includes('SYS_ADMIN')) where.createdBy = user.id;
 
     const [workshops, total] = await Promise.all([
       this.prisma.workshop.findMany({
@@ -106,6 +114,21 @@ export class CatalogService {
 
     const items = await Promise.all(workshops.map((w) => this.toWorkshopResponse(w)));
     return { items, total, page, limit, totalPages: Math.ceil(total / limit) };
+  }
+
+  async adminDetail(id: string, user: AuthenticatedUser) {
+    const w = await this.prisma.workshop.findUnique({
+      where: { id },
+      include: { speaker: true, room: true },
+    });
+    if (!w) throw new NotFoundException('workshop_not_found');
+
+    const isSysAdmin = user.roles.includes('SYS_ADMIN');
+    if (!isSysAdmin && w.createdBy !== user.id) {
+      throw new ForbiddenException('not_workshop_owner');
+    }
+
+    return this.toWorkshopResponse(w);
   }
 
   // ==================== ORGANIZER CRUD ====================
@@ -171,13 +194,21 @@ export class CatalogService {
 
     // Khởi tạo seat counter
     await this.redis.getClient().set(`seat:${workshop.id}`, workshop.capacity).catch(() => {});
+    await this.audit.log({
+      actorId: createdBy,
+      action: 'workshop_created',
+      resource: 'workshop',
+      resourceId: workshop.id,
+      metadata: { title: workshop.title, status: workshop.status },
+    });
 
     return workshop;
   }
 
-  async publish(id: string) {
+  async publish(id: string, user: AuthenticatedUser) {
     const w = await this.prisma.workshop.findUnique({ where: { id } });
     if (!w) throw new NotFoundException('workshop_not_found');
+    this.assertCanManageWorkshop(w, user);
     if (w.status !== 'DRAFT') {
       throw new UnprocessableEntityException({ code: 'invalid_state', message: `Chỉ workshop DRAFT mới publish được (hiện tại: ${w.status}).` });
     }
@@ -197,12 +228,25 @@ export class CatalogService {
     });
 
     await this.invalidateCache();
+    await this.audit.log({
+      actorId: user.id,
+      action: 'workshop_published',
+      resource: 'workshop',
+      resourceId: id,
+      metadata: { previousStatus: w.status, status: updated.status },
+    });
     return updated;
   }
 
-  async update(id: string, dto: UpdateWorkshopDto, expectedVersion: number) {
+  async update(
+    id: string,
+    dto: UpdateWorkshopDto,
+    expectedVersion: number,
+    user: AuthenticatedUser,
+  ) {
     const w = await this.prisma.workshop.findUnique({ where: { id } });
     if (!w) throw new NotFoundException('workshop_not_found');
+    this.assertCanManageWorkshop(w, user);
 
     // Optimistic lock
     if (w.version !== expectedVersion) {
@@ -260,12 +304,20 @@ export class CatalogService {
     });
 
     await this.invalidateCache();
+    await this.audit.log({
+      actorId: user.id,
+      action: 'workshop_updated',
+      resource: 'workshop',
+      resourceId: id,
+      metadata: { expectedVersion, newVersion: updated.version, changes: dto },
+    });
     return updated;
   }
 
-  async cancel(id: string, reason: string) {
+  async cancel(id: string, reason: string, user: AuthenticatedUser) {
     const w = await this.prisma.workshop.findUnique({ where: { id } });
     if (!w) throw new NotFoundException('workshop_not_found');
+    this.assertCanManageWorkshop(w, user);
     const updated = await this.prisma.$transaction(async (tx) => {
       const u = await tx.workshop.update({
         where: { id },
@@ -294,6 +346,13 @@ export class CatalogService {
     // Seat = 0
     await this.redis.getClient().set(`seat:${id}`, 0).catch(() => {});
     await this.invalidateCache();
+    await this.audit.log({
+      actorId: user.id,
+      action: 'workshop_cancelled',
+      resource: 'workshop',
+      resourceId: id,
+      metadata: { reason, previousStatus: w.status },
+    });
     return updated;
   }
 
@@ -337,6 +396,35 @@ export class CatalogService {
     return seats;
   }
 
+  async publishedSeatSnapshot(): Promise<Record<string, number>> {
+    const workshops = await this.prisma.workshop.findMany({
+      where: { status: WorkshopStatus.PUBLISHED },
+      select: { id: true, capacity: true },
+      orderBy: { startAt: 'asc' },
+    });
+    if (workshops.length === 0) return {};
+
+    try {
+      const keys = workshops.map((w) => `seat:${w.id}`);
+      const vals = await this.redis.getClient().mget(...keys);
+      return workshops.reduce<Record<string, number>>((acc, workshop, index) => {
+        const parsed = parseInt(vals[index] ?? '', 10);
+        acc[workshop.id] = Number.isFinite(parsed)
+          ? Math.max(0, parsed)
+          : workshop.capacity;
+        return acc;
+      }, {});
+    } catch {
+      const entries = await Promise.all(
+        workshops.map(async (workshop) => [
+          workshop.id,
+          await this.getSeatsLeft(workshop.id, workshop.capacity),
+        ] as const),
+      );
+      return Object.fromEntries(entries);
+    }
+  }
+
   private async toWorkshopResponse(
     workshop: Prisma.WorkshopGetPayload<{ include: { speaker: true; room: true } }>,
   ) {
@@ -352,6 +440,16 @@ export class CatalogService {
       roomName: workshop.room?.name ?? workshop.room?.code ?? null,
       highlights,
     };
+  }
+
+  private assertCanManageWorkshop(
+    workshop: { createdBy: string | null },
+    user: AuthenticatedUser,
+  ): void {
+    if (user.roles.includes('SYS_ADMIN')) return;
+    if (workshop.createdBy !== user.id) {
+      throw new ForbiddenException('not_workshop_owner');
+    }
   }
 
   // ==================== CACHE ====================

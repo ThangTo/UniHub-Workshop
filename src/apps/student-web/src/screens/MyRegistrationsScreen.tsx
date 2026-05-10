@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
+import QRCode from 'qrcode';
 import { api, apiError, newIdempotencyKey } from '../lib/api';
 import type { MyRegistration, PaymentInitResponse, RegistrationStatus } from '../lib/types';
 import { formatCurrency, formatDateRange, formatDateTime } from '../lib/format';
@@ -179,10 +180,35 @@ function StatusBadge({ status }: { status: RegistrationStatus }) {
 }
 
 function QrPanel({ token }: { token: string }) {
-  // Dùng QR code SVG sinh từ backend qua endpoint riêng — fallback hiển thị token text.
-  // Backend /registrations/:id/qr trả image PNG/SVG; ta lấy bằng <img src=...>
-  // Để tránh kéo thêm libs, nhúng qrcode-dot-img từ public service "api.qrserver.com" KHÔNG khả thi vì lộ token.
-  // → Chỉ hiển thị token + nút copy. UI có thể được nâng cấp dùng `qrcode.react` sau.
+  const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
+  const [copyLabel, setCopyLabel] = useState('Copy token');
+
+  useEffect(() => {
+    let cancelled = false;
+    setQrDataUrl(null);
+    QRCode.toDataURL(token, {
+      errorCorrectionLevel: 'M',
+      margin: 2,
+      width: 220,
+      color: { dark: '#0f172a', light: '#ffffff' },
+    })
+      .then((dataUrl) => {
+        if (!cancelled) setQrDataUrl(dataUrl);
+      })
+      .catch(() => {
+        if (!cancelled) setQrDataUrl(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [token]);
+
+  async function copyToken() {
+    await navigator.clipboard.writeText(token);
+    setCopyLabel('Copied');
+    window.setTimeout(() => setCopyLabel('Copy token'), 1500);
+  }
+
   return (
     <div className="mt-4 rounded-md border border-slate-200 bg-slate-50 p-4">
       <div className="mb-2 flex items-center justify-between">
@@ -191,7 +217,26 @@ function QrPanel({ token }: { token: string }) {
         </span>
         <span className="text-xs text-slate-500">Cập nhật: {formatDateTime(new Date().toISOString())}</span>
       </div>
-      <code className="block break-all rounded bg-white p-2 text-xs text-slate-700">{token}</code>
+      <div className="grid gap-4 sm:grid-cols-[240px_minmax(0,1fr)] sm:items-center">
+        <div className="flex h-60 w-60 items-center justify-center rounded bg-white p-3 shadow-sm">
+          {qrDataUrl ? (
+            <img src={qrDataUrl} alt="QR check-in" className="h-full w-full object-contain" />
+          ) : (
+            <span className="text-xs text-slate-500">Đang tạo QR...</span>
+          )}
+        </div>
+        <div className="min-w-0 space-y-3">
+          <p className="text-sm text-slate-600">
+            Xuất trình mã này cho nhân viên check-in tại cửa workshop.
+          </p>
+          <code className="block max-h-24 overflow-auto break-all rounded bg-white p-2 text-xs text-slate-700">
+            {token}
+          </code>
+          <button type="button" className="btn-outline" onClick={copyToken}>
+            {copyLabel}
+          </button>
+        </div>
+      </div>
       <p className="mt-2 text-xs text-slate-500">
         Mã được ký bằng RS256, có hạn từ 1 giờ trước khi workshop bắt đầu đến 1 giờ sau khi kết
         thúc. Mở app mobile để hiển thị QR scan-friendly.

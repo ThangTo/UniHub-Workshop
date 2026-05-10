@@ -5,14 +5,16 @@ import {
   Get,
   Headers,
   HttpCode,
+  HttpStatus,
   Param,
   ParseUUIDPipe,
   Post,
   Req,
+  Res,
   UnauthorizedException,
 } from '@nestjs/common';
 import * as crypto from 'crypto';
-import { Request } from 'express';
+import { Request, Response } from 'express';
 import { Public } from '../../common/decorators/public.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
@@ -43,8 +45,10 @@ export class PaymentController {
     @Body() dto: InitiatePaymentDto,
     @CurrentUser() user: AuthenticatedUser,
     @Headers('idempotency-key') idemKey: string,
+    @Res({ passthrough: true }) res: Response,
   ) {
     const result = await this.svc.initiate(user.id, dto.registrationId, idemKey);
+    res.status(result.status === 'pending' ? HttpStatus.ACCEPTED : HttpStatus.CREATED);
     return {
       status: result.status,
       paymentId: result.payment.id,
@@ -96,7 +100,17 @@ export class PaymentController {
       .update(JSON.stringify(body))
       .digest('hex');
 
-    if (!crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) {
+    const normalizedSignature = signature.trim();
+    if (!/^[0-9a-f]{64}$/i.test(normalizedSignature)) {
+      throw new UnauthorizedException('invalid_signature');
+    }
+
+    const signatureBuffer = Buffer.from(normalizedSignature, 'hex');
+    const expectedBuffer = Buffer.from(expected, 'hex');
+    if (
+      signatureBuffer.length !== expectedBuffer.length ||
+      !crypto.timingSafeEqual(signatureBuffer, expectedBuffer)
+    ) {
       throw new UnauthorizedException('invalid_signature');
     }
 
