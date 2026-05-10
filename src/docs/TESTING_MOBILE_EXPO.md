@@ -75,6 +75,18 @@ Neu dien thoai khong goi duoc backend:
 - Cho phep Windows Firewall mo port 3000.
 - Thu mo `http://<IPv4>:3000/health` tren trinh duyet cua dien thoai.
 
+### 2.4 Mobile Co Can `.env` Khong?
+
+Mobile app hien khong bat buoc tao `.env`. Man hinh login co o `API Base URL`;
+ban nhap URL backend theo moi truong dang dung:
+
+- Dien thoai that: `http://<IPv4-cua-may-tinh>:3000`
+- Android emulator: `http://10.0.2.2:3000`
+- iOS simulator: `http://localhost:3000`
+
+Sau khi login, app se luu API URL nay lai bang AsyncStorage. Chi tiet cac env
+khac cua he thong nam o `docs/ENVIRONMENT.md`.
+
 ## 3. Start Backend Va Web De Tao QR
 
 Tu thu muc `src`:

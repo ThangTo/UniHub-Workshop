@@ -22,6 +22,10 @@ Expected:
 - Unit tests xanh.
 - Docker config/build xanh.
 
+Neu chay bang Docker full stack, khong can tao `.env` vi `docker-compose.yml`
+da co default dev values. Neu chay backend local hoac can JWT key co dinh cho
+demo scripts, xem `docs/ENVIRONMENT.md`.
+
 ## 2. Smoke Test AI Summary
 
 Start stack:

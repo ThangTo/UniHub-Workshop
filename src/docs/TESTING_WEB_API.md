@@ -28,6 +28,26 @@ Di chuyen vao workspace source:
 cd d:\HCMUS\Nam_3\HK2\TKPM\Project\UniHubWorkshop\src
 ```
 
+## 1.1 Co Can Tao `.env` Khong?
+
+Neu chay full stack bang Docker, ban khong bat buoc tao `.env`. File
+`docker-compose.yml` da co default dev values cho DB, Redis, RabbitMQ, MinIO,
+Mailhog SMTP, mock payment gateway va mock AI.
+
+Muon xem/toy bien env thi copy:
+
+```powershell
+Copy-Item .env.example .env
+```
+
+Neu chay backend local ngoai Docker, tao file `apps/backend/.env` tu:
+
+```powershell
+Copy-Item apps/backend/.env.example apps/backend/.env
+```
+
+Chi tiet tung bien nam o `docs/ENVIRONMENT.md`.
+
 ## 2. Start Full Stack Bang Docker
 
 Lan dau chay se hoi lau vi Docker phai pull image infra.

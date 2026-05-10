@@ -96,6 +96,7 @@ Detailed test guides for grading/demo are in `docs/`:
 - `docs/TESTING_WEB_API.md` - full Docker stack, backend API, Student Web, Admin Web, AI summary, CSV sync.
 - `docs/TESTING_MOBILE_EXPO.md` - Expo mobile check-in guide from zero, including physical phone/emulator setup and offline queue scenarios.
 - `docs/TESTING_DEMO_SCRIPTS.md` - race condition, idempotency, k6 load, smoke scripts, and evidence checklist.
+- `docs/ENVIRONMENT.md` - environment variables, Docker defaults, local backend `.env`, web env, and mobile API URL setup.
 
 ## Phát triển
 
