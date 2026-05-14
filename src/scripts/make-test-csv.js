@@ -6,9 +6,11 @@
  *   node scripts/make-test-csv.js --rows=10000          # 10K dòng
  *   node scripts/make-test-csv.js --bad-header          # header sai
  *   node scripts/make-test-csv.js --partial             # 5% dòng lỗi
+ *   node scripts/make-test-csv.js --seed=123456         # nội dung ổn định theo seed
  *   node scripts/make-test-csv.js --out=path/file.csv   # đường dẫn out
  *
- * Mặc định out = `apps/backend/data/csv-drop/students_<NOW>.csv`.
+ * Mặc định out = `data/csv-drop/students_<NOW>.csv`, đúng volume Docker mount
+ * vào `/repo/apps/backend/data/csv-drop`.
  */
 const fs = require('fs');
 const path = require('path');
@@ -22,6 +24,8 @@ const args = process.argv.slice(2).reduce((acc, raw) => {
 const rows = Number(args.rows ?? 100);
 const partial = Boolean(args.partial);
 const badHeader = Boolean(args['bad-header']);
+const seed = String(args.seed ?? Date.now()).replace(/\D/g, '').slice(-6).padStart(6, '0');
+const baseCode = Number(args['base-code'] ?? (73_000_000 + Number(seed)));
 const stamp = new Date()
   .toISOString()
   .replace(/[-:T]/g, '')
@@ -31,8 +35,6 @@ const tag = stamp.slice(0, 8) + '_' + stamp.slice(8, 14);
 const defaultOut = path.join(
   __dirname,
   '..',
-  'apps',
-  'backend',
   'data',
   'csv-drop',
   `students_${tag}.csv`,
@@ -47,10 +49,10 @@ const header = badHeader
 
 const lines = [header];
 for (let i = 0; i < rows; i++) {
-  const code = (21120000 + i + 1).toString().padStart(8, '0');
-  const name = `Sinh viên ${i + 1}`;
+  const code = (baseCode + i + 1).toString().padStart(8, '0');
+  const name = `Sinh viên ${seed}-${i + 1}`;
   const isPartialErr = partial && i % 20 === 0;
-  const email = isPartialErr ? 'not-an-email' : `sv${i + 1}@student.edu.vn`;
+  const email = isPartialErr ? 'not-an-email' : `sv${seed}-${i + 1}@student.edu.vn`;
   const faculty = ['CNTT', 'KTPM', 'KHMT'][i % 3];
   const cohort = 2020 + (i % 5);
   const active = i % 7 === 0 ? 'false' : 'true';

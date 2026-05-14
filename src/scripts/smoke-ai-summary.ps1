@@ -18,8 +18,24 @@ Write-Host ("    token=" + $token.Substring(0,40) + "...") -ForegroundColor Gray
 Write-Host "==> 2. Pick a workshop" -ForegroundColor Cyan
 $auth = @{ Authorization = "Bearer $token" }
 $wsList = Invoke-RestMethod -Method Get -Uri "$base/workshops" -Headers $auth
-if ($wsList.items.Count -eq 0) { throw "No workshops to test." }
-$ws = $wsList.items | Select-Object -First 1
+if ($wsList.items.Count -eq 0) {
+  Write-Host "    no published upcoming workshop; creating one for smoke test" -ForegroundColor DarkYellow
+  $startAt = (Get-Date).AddDays(7).ToUniversalTime().ToString('o')
+  $endAt = (Get-Date).AddDays(7).AddHours(2).ToUniversalTime().ToString('o')
+  $createBody = @{
+    title = "AI Summary Smoke Workshop"
+    description = "Workshop created by smoke-ai-summary.ps1"
+    startAt = $startAt
+    endAt = $endAt
+    capacity = 30
+    feeAmount = 0
+  } | ConvertTo-Json
+  $created = Invoke-RestMethod -Method Post -Uri "$base/workshops" -Headers $auth -ContentType 'application/json' -Body $createBody
+  Invoke-RestMethod -Method Post -Uri "$base/workshops/$($created.id)/publish" -Headers $auth | Out-Null
+  $ws = $created
+} else {
+  $ws = $wsList.items | Select-Object -First 1
+}
 Write-Host ("    workshop=" + $ws.id + " - " + $ws.title) -ForegroundColor Gray
 
 Write-Host "==> 3. Upload PDF (multipart)" -ForegroundColor Cyan

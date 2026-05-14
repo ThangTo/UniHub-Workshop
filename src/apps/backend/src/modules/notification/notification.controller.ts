@@ -1,5 +1,6 @@
 import {
   Controller,
+  DefaultValuePipe,
   Get,
   HttpCode,
   Param,
@@ -29,7 +30,7 @@ export class NotificationController {
   async listMine(
     @CurrentUser() user: AuthenticatedUser,
     @Query('unread') unread?: string,
-    @Query('limit', new ParseIntPipe({ optional: true })) limit?: number,
+    @Query('limit', new DefaultValuePipe(20), ParseIntPipe) limit: number = 20,
   ) {
     return this.prisma.notification.findMany({
       where: {
@@ -38,7 +39,7 @@ export class NotificationController {
         ...(unread === 'true' ? { status: { not: NotificationStatus.READ } } : {}),
       },
       orderBy: { createdAt: 'desc' },
-      take: limit ?? 20,
+      take: Math.min(Math.max(limit, 1), 100),
     });
   }
 

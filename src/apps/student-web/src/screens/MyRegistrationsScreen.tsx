@@ -49,7 +49,7 @@ export function MyRegistrationsScreen() {
       }
       if (r.data.status === 'success') {
         await reloadRegistrations();
-        alert('Thanh toÃ¡n thÃ nh cÃ´ng. QR check-in Ä‘Ã£ sáºµn sÃ ng.');
+        alert('Thanh toán thành công. QR check-in đã sẵn sàng.');
         return;
       }
       if (r.data.paymentId) {

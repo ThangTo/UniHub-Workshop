@@ -33,44 +33,62 @@ export function LoginScreen() {
   }
 
   return (
-    <div className="flex min-h-full items-center justify-center bg-gradient-to-br from-brand-50 to-slate-100 px-4 py-12">
-      <div className="card w-full max-w-md p-8">
-        <h1 className="mb-1 text-2xl font-bold text-slate-900">UniHub Workshop</h1>
-        <p className="mb-6 text-sm text-slate-500">Đăng nhập để đăng ký workshop yêu thích.</p>
-        <form onSubmit={onSubmit} className="space-y-4">
-          <div>
-            <label className="mb-1 block text-sm font-medium text-slate-700">Email</label>
+    <div className="flex min-h-screen flex-col items-center justify-center p-6">
+      <div className="card w-full max-w-md p-10 backdrop-blur-xl border-white/60">
+        <div className="mb-10 text-center">
+          <h1 className="mb-3 text-4xl font-extrabold tracking-tight bg-gradient-to-r from-brand-600 to-brand-400 bg-clip-text text-transparent">
+            UniHub Workshop
+          </h1>
+          <p className="text-sm font-medium text-slate-500">
+            Chào mừng trở lại! Đăng nhập để tiếp tục.
+          </p>
+        </div>
+        
+        <form onSubmit={onSubmit} className="space-y-6">
+          <div className="space-y-1.5">
+            <label className="block text-sm font-semibold text-slate-700 tracking-wide">Email</label>
             <input
               type="email"
               required
               autoComplete="email"
-              className="input"
+              className="input text-base py-3"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
+              placeholder="sinhvien@student.hcmus.edu.vn"
             />
           </div>
-          <div>
-            <label className="mb-1 block text-sm font-medium text-slate-700">Mật khẩu</label>
+          <div className="space-y-1.5">
+            <label className="block text-sm font-semibold text-slate-700 tracking-wide">Mật khẩu</label>
             <input
               type="password"
               required
               autoComplete="current-password"
-              className="input"
+              className="input text-base py-3"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
+              placeholder="••••••••"
             />
           </div>
-          {error && <div className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
-          <button type="submit" className="btn-primary w-full" disabled={submitting}>
-            {submitting ? 'Đang đăng nhập…' : 'Đăng nhập'}
+          
+          {error && (
+            <div className="rounded-xl border border-red-100 bg-red-50/50 p-4 text-sm font-medium text-red-600 backdrop-blur-sm">
+              {error}
+            </div>
+          )}
+          
+          <button type="submit" className="btn-primary w-full py-3.5 text-base" disabled={submitting}>
+            {submitting ? 'Đang xác thực…' : 'Đăng nhập'}
           </button>
         </form>
-        <p className="mt-6 text-center text-sm text-slate-600">
-          Chưa có tài khoản?{' '}
-          <Link to="/register" className="font-medium text-brand-600 hover:underline">
-            Đăng ký
-          </Link>
-        </p>
+        
+        <div className="mt-8 pt-6 border-t border-slate-200/60 text-center">
+          <p className="text-sm font-medium text-slate-600">
+            Chưa có tài khoản?{' '}
+            <Link to="/register" className="text-brand-600 hover:text-brand-500 hover:underline transition-colors">
+              Đăng ký ngay
+            </Link>
+          </p>
+        </div>
       </div>
     </div>
   );

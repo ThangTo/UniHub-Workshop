@@ -58,7 +58,11 @@ async function main() {
 
   const organizer = await prisma.user.upsert({
     where: { email: 'organizer@unihub.local' },
-    update: {},
+    update: {
+      passwordHash,
+      fullName: 'Organizer Demo',
+      isActive: true,
+    },
     create: {
       email: 'organizer@unihub.local',
       passwordHash,
@@ -68,13 +72,24 @@ async function main() {
   });
   const checkinStaff = await prisma.user.upsert({
     where: { email: 'staff@unihub.local' },
-    update: {},
+    update: {
+      passwordHash,
+      fullName: 'Checkin Staff Demo',
+      isActive: true,
+    },
     create: {
       email: 'staff@unihub.local',
       passwordHash,
       fullName: 'Checkin Staff Demo',
       roles: { create: { roleId: roleMap.get('CHECKIN_STAFF')! } },
     },
+  });
+  await prisma.userRole.createMany({
+    data: [
+      { userId: organizer.id, roleId: roleMap.get('ORGANIZER')! },
+      { userId: checkinStaff.id, roleId: roleMap.get('CHECKIN_STAFF')! },
+    ],
+    skipDuplicates: true,
   });
   console.log(`  ✓ Users: ${organizer.email}, ${checkinStaff.email} (password: Test@12345)`);
 

@@ -521,89 +521,136 @@ export default function App() {
 
   return (
     <SafeAreaView style={styles.page}>
-      <View style={styles.header}>
-        <View>
-          <Text style={styles.title}>UniHub Check-in</Text>
-          <Text style={styles.subtitle}>{auth ? auth.fullName ?? 'Check-in staff' : 'Staff login'}</Text>
-        </View>
-        <View style={[styles.statusPill, isOnline ? styles.online : styles.offline]}>
-          <Text style={styles.statusText}>{isOnline ? 'Online' : isOnline === false ? 'Offline' : 'Network'}</Text>
-        </View>
-      </View>
-
       {!auth ? (
-        <View style={styles.panel}>
-          <TextInput value={apiBaseUrl} onChangeText={setApiBaseUrl} style={styles.input} autoCapitalize="none" />
-          <TextInput value={email} onChangeText={setEmail} style={styles.input} autoCapitalize="none" />
-          <TextInput value={password} onChangeText={setPassword} style={styles.input} secureTextEntry />
-          <ActionButton label="Login + cache public key" onPress={login} disabled={busy} />
+        <View style={styles.loginContainer}>
+          <View style={styles.loginHeader}>
+            <Text style={styles.title}>UniHub Check-in</Text>
+            <Text style={styles.subtitle}>Login once to cache the public key, then scan QR codes online or offline.</Text>
+          </View>
+          <View style={styles.loginCard}>
+            <View style={[styles.statusPill, isOnline ? styles.online : styles.offline]}>
+              <Text style={styles.statusText}>{isOnline ? 'Online' : isOnline === false ? 'Offline' : 'Network'}</Text>
+            </View>
+            <View style={styles.fieldGroup}>
+              <Text style={styles.label}>Backend API URL</Text>
+              <TextInput
+                value={apiBaseUrl}
+                onChangeText={setApiBaseUrl}
+                style={styles.input}
+                autoCapitalize="none"
+                autoCorrect={false}
+                keyboardType="url"
+                placeholder="http://192.168.1.23:3000"
+                placeholderTextColor="#94a3b8"
+              />
+            </View>
+            <View style={styles.fieldGroup}>
+              <Text style={styles.label}>Staff email</Text>
+              <TextInput
+                value={email}
+                onChangeText={setEmail}
+                style={styles.input}
+                autoCapitalize="none"
+                autoCorrect={false}
+                keyboardType="email-address"
+                placeholder="staff@unihub.local"
+                placeholderTextColor="#94a3b8"
+              />
+            </View>
+            <View style={styles.fieldGroup}>
+              <Text style={styles.label}>Password</Text>
+              <TextInput
+                value={password}
+                onChangeText={setPassword}
+                style={styles.input}
+                secureTextEntry
+                placeholder="Test@12345"
+                placeholderTextColor="#94a3b8"
+              />
+            </View>
+            <ActionButton label={busy ? 'Logging in...' : 'Login and Cache Key'} onPress={login} disabled={busy} />
+            <Text style={styles.helpText}>Use your computer IPv4 address for a real phone. Android emulator uses 10.0.2.2.</Text>
+          </View>
         </View>
       ) : (
-        <View style={styles.panel}>
-          <View style={styles.metaPanel}>
-            <Text style={styles.metaText}>Device: {deviceId}</Text>
-            <Text style={styles.metaText}>
-              Public key: {jwks ? `${jwks.issuer}, ${new Date(jwks.fetchedAt).toLocaleString()}` : 'not cached'}
-            </Text>
-            <Text style={styles.metaText}>Last sync: {lastSyncMessage}</Text>
-          </View>
-
-          {scannerOpen ? (
-            <View style={styles.cameraFrame}>
-              <CameraView
-                style={styles.camera}
-                barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
-                onBarcodeScanned={({ data }) => {
-                  if (!busy && data) void queueScan(data);
-                }}
-              />
-              <Pressable onPress={() => setScannerOpen(false)} style={styles.secondaryButton}>
-                <Text style={styles.secondaryButtonText}>Close camera</Text>
-              </Pressable>
+        <>
+          <View style={styles.header}>
+            <View>
+              <Text style={styles.title}>UniHub Check-in</Text>
+              <Text style={styles.subtitle}>{auth.fullName ?? 'Check-in staff'}</Text>
             </View>
-          ) : null}
-          <TextInput
-            value={qrToken}
-            onChangeText={setQrToken}
-            style={[styles.input, styles.qrInput]}
-            autoCapitalize="none"
-            multiline
-            placeholder="Paste QR token"
-          />
-          <View style={styles.row}>
-            <ActionButton label="Scan QR" onPress={openScanner} disabled={busy} />
-            <ActionButton label="Queue Token" onPress={() => queueScan()} disabled={busy || !qrToken.trim()} />
+            <View style={[styles.statusPill, isOnline ? styles.online : styles.offline]}>
+              <Text style={styles.statusText}>{isOnline ? 'Online' : isOnline === false ? 'Offline' : 'Network'}</Text>
+            </View>
           </View>
-          <View style={styles.row}>
-            <ActionButton label={`Sync ${pendingCount}`} onPress={() => syncPending(false)} disabled={busy || pendingCount === 0} />
-            <ActionButton label="Refresh key" onPress={refreshJwks} disabled={busy || !isOnline} />
-          </View>
-          <Pressable onPress={logout} style={styles.secondaryButton}>
-            <Text style={styles.secondaryButtonText}>Logout</Text>
-          </Pressable>
-        </View>
-      )}
 
-      <View style={styles.listHeader}>
-        <Text style={styles.sectionTitle}>Local Queue</Text>
-        <Text style={styles.queueText}>
-          {pendingCount} pending / {completedCount} done
-        </Text>
-        {busy ? <ActivityIndicator /> : null}
-      </View>
-      <FlatList
-        data={pending}
-        keyExtractor={(item) => item.idempotencyKey}
-        renderItem={({ item }) => (
-          <View style={styles.scanItem}>
-            <Text style={styles.scanTitle}>{item.resultCode ?? (item.synced ? 'synced' : 'pending')}</Text>
-            <Text style={styles.scanMeta}>{new Date(item.scannedAt).toLocaleString()}</Text>
-            <Text style={styles.scanMeta}>reg={item.regId ?? 'unknown'}</Text>
-            {item.errorMessage ? <Text style={styles.errorText}>{item.errorMessage}</Text> : null}
-            <Text style={styles.scanKey}>{item.idempotencyKey}</Text>
+          <View style={styles.panel}>
+            <View style={styles.metaPanel}>
+              <Text style={styles.metaText}>Device: {deviceId}</Text>
+              <Text style={styles.metaText}>
+                Public key: {jwks ? `${jwks.issuer}, ${new Date(jwks.fetchedAt).toLocaleString()}` : 'not cached'}
+              </Text>
+              <Text style={styles.metaText}>Last sync: {lastSyncMessage}</Text>
+            </View>
+
+            {scannerOpen ? (
+              <View style={styles.cameraFrame}>
+                <CameraView
+                  style={styles.camera}
+                  barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
+                  onBarcodeScanned={({ data }) => {
+                    if (!busy && data) void queueScan(data);
+                  }}
+                />
+                <Pressable onPress={() => setScannerOpen(false)} style={styles.secondaryButton}>
+                  <Text style={styles.secondaryButtonText}>Close camera</Text>
+                </Pressable>
+              </View>
+            ) : null}
+            <TextInput
+              value={qrToken}
+              onChangeText={setQrToken}
+              style={[styles.input, styles.qrInput]}
+              autoCapitalize="none"
+              multiline
+              placeholder="Paste QR token"
+              placeholderTextColor="#94a3b8"
+            />
+            <View style={styles.row}>
+              <ActionButton label="Scan QR" onPress={openScanner} disabled={busy} />
+              <ActionButton label="Queue Token" onPress={() => queueScan()} disabled={busy || !qrToken.trim()} />
+            </View>
+            <View style={styles.row}>
+              <ActionButton label={`Sync ${pendingCount}`} onPress={() => syncPending(false)} disabled={busy || pendingCount === 0} />
+              <ActionButton label="Refresh key" onPress={refreshJwks} disabled={busy || !isOnline} />
+            </View>
+            <Pressable onPress={logout} style={styles.secondaryButton}>
+              <Text style={styles.secondaryButtonText}>Logout</Text>
+            </Pressable>
           </View>
-        )}
-      />
+
+          <View style={styles.listHeader}>
+            <Text style={styles.sectionTitle}>Local Queue</Text>
+            <Text style={styles.queueText}>
+              {pendingCount} pending / {completedCount} done
+            </Text>
+            {busy ? <ActivityIndicator /> : null}
+          </View>
+          <FlatList
+            data={pending}
+            keyExtractor={(item) => item.idempotencyKey}
+            renderItem={({ item }) => (
+              <View style={styles.scanItem}>
+                <Text style={styles.scanTitle}>{item.resultCode ?? (item.synced ? 'synced' : 'pending')}</Text>
+                <Text style={styles.scanMeta}>{new Date(item.scannedAt).toLocaleString()}</Text>
+                <Text style={styles.scanMeta}>reg={item.regId ?? 'unknown'}</Text>
+                {item.errorMessage ? <Text style={styles.errorText}>{item.errorMessage}</Text> : null}
+                <Text style={styles.scanKey}>{item.idempotencyKey}</Text>
+              </View>
+            )}
+          />
+        </>
+      )}
     </SafeAreaView>
   );
 }
@@ -630,47 +677,67 @@ function confirmAsync(title: string, message: string, confirmLabel: string): Pro
 }
 
 const styles = StyleSheet.create({
-  page: { flex: 1, backgroundColor: '#f8fafc', padding: 16 },
-  header: { marginBottom: 18, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
-  title: { color: '#0f172a', fontSize: 28, fontWeight: '700' },
-  subtitle: { color: '#475569', marginTop: 4 },
-  statusPill: { borderRadius: 999, paddingHorizontal: 10, paddingVertical: 6 },
-  online: { backgroundColor: '#dcfce7' },
-  offline: { backgroundColor: '#fee2e2' },
-  statusText: { color: '#0f172a', fontSize: 12, fontWeight: '700' },
-  panel: { gap: 10, marginBottom: 18 },
-  metaPanel: { backgroundColor: '#ffffff', borderColor: '#e2e8f0', borderWidth: 1, borderRadius: 8, padding: 10, gap: 4 },
-  metaText: { color: '#475569', fontSize: 12 },
+  page: { flex: 1, backgroundColor: '#f0f4f8', paddingHorizontal: 20, paddingTop: 12 },
+  loginContainer: { flex: 1, justifyContent: 'center', paddingBottom: 36 },
+  loginHeader: { marginBottom: 22, paddingHorizontal: 4 },
+  loginCard: {
+    gap: 16,
+    backgroundColor: '#ffffff',
+    padding: 22,
+    borderRadius: 24,
+    shadowColor: '#0f172a',
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.08,
+    shadowRadius: 20,
+    elevation: 6,
+  },
+  fieldGroup: { gap: 8 },
+  helpText: { color: '#64748b', fontSize: 13, lineHeight: 18, textAlign: 'center' },
+  header: { marginBottom: 24, paddingTop: 12, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
+  title: { color: '#0f172a', fontSize: 30, fontWeight: '800', letterSpacing: 0 },
+  subtitle: { color: '#64748b', marginTop: 8, fontSize: 15, fontWeight: '500', lineHeight: 21 },
+  statusPill: { alignSelf: 'flex-start', borderRadius: 999, paddingHorizontal: 12, paddingVertical: 8, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 },
+  online: { backgroundColor: '#dcfce7', borderWidth: 1, borderColor: '#bbf7d0' },
+  offline: { backgroundColor: '#fee2e2', borderWidth: 1, borderColor: '#fecaca' },
+  statusText: { color: '#0f172a', fontSize: 13, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5 },
+  panel: { gap: 14, marginBottom: 24, backgroundColor: '#ffffff', padding: 20, borderRadius: 24, shadowColor: '#000', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.06, shadowRadius: 16, elevation: 4 },
+  label: { color: '#334155', fontSize: 13, fontWeight: '700', marginLeft: 4, textTransform: 'uppercase', letterSpacing: 0 },
+  metaPanel: { backgroundColor: '#f8fafc', borderColor: '#e2e8f0', borderWidth: 1, borderRadius: 16, padding: 14, gap: 6 },
+  metaText: { color: '#475569', fontSize: 13, fontWeight: '500' },
   input: {
     borderWidth: 1,
     borderColor: '#cbd5e1',
-    borderRadius: 8,
+    borderRadius: 16,
     backgroundColor: '#ffffff',
     color: '#0f172a',
-    padding: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    fontSize: 15,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.02, shadowRadius: 4, elevation: 1
   },
-  qrInput: { minHeight: 96, textAlignVertical: 'top' },
-  cameraFrame: { borderRadius: 8, overflow: 'hidden', backgroundColor: '#0f172a' },
-  camera: { height: 260 },
-  row: { flexDirection: 'row', gap: 10 },
-  button: { flex: 1, backgroundColor: '#0f766e', borderRadius: 8, padding: 14, alignItems: 'center' },
-  buttonDisabled: { backgroundColor: '#94a3b8' },
-  buttonText: { color: '#ffffff', fontWeight: '700' },
-  secondaryButton: { alignItems: 'center', padding: 10 },
-  secondaryButtonText: { color: '#334155', fontWeight: '600' },
-  listHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, gap: 8 },
-  sectionTitle: { color: '#0f172a', fontSize: 18, fontWeight: '700' },
-  queueText: { color: '#475569', fontSize: 12 },
+  qrInput: { minHeight: 100, textAlignVertical: 'top' },
+  cameraFrame: { borderRadius: 16, overflow: 'hidden', backgroundColor: '#0f172a', borderWidth: 1, borderColor: '#e2e8f0' },
+  camera: { height: 300 },
+  row: { flexDirection: 'row', gap: 12 },
+  button: { flex: 1, minHeight: 52, justifyContent: 'center', backgroundColor: '#0f766e', borderRadius: 16, paddingHorizontal: 14, paddingVertical: 15, alignItems: 'center', shadowColor: '#0f766e', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 5 },
+  buttonDisabled: { backgroundColor: '#94a3b8', shadowOpacity: 0 },
+  buttonText: { color: '#ffffff', fontWeight: '800', fontSize: 15, letterSpacing: 0, textAlign: 'center' },
+  secondaryButton: { alignItems: 'center', padding: 12, marginTop: 4 },
+  secondaryButtonText: { color: '#475569', fontWeight: '700', fontSize: 15 },
+  listHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, gap: 8, paddingHorizontal: 4 },
+  sectionTitle: { color: '#0f172a', fontSize: 20, fontWeight: '800' },
+  queueText: { color: '#64748b', fontSize: 14, fontWeight: '600', backgroundColor: '#e2e8f0', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 },
   scanItem: {
     backgroundColor: '#ffffff',
     borderColor: '#e2e8f0',
     borderWidth: 1,
-    borderRadius: 8,
-    padding: 12,
-    marginBottom: 8,
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 10,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.03, shadowRadius: 8, elevation: 2
   },
-  scanTitle: { color: '#0f172a', fontWeight: '700' },
-  scanMeta: { color: '#64748b', marginTop: 4 },
-  scanKey: { color: '#475569', marginTop: 6, fontSize: 11 },
-  errorText: { color: '#b91c1c', marginTop: 4, fontSize: 12 },
+  scanTitle: { color: '#0f172a', fontWeight: '800', fontSize: 15, textTransform: 'uppercase' },
+  scanMeta: { color: '#64748b', marginTop: 6, fontSize: 13, fontWeight: '500' },
+  scanKey: { color: '#94a3b8', marginTop: 8, fontSize: 11, fontFamily: 'monospace' },
+  errorText: { color: '#dc2626', marginTop: 6, fontSize: 13, fontWeight: '600', backgroundColor: '#fef2f2', padding: 8, borderRadius: 8, overflow: 'hidden' },
 });

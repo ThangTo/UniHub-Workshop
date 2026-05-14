@@ -77,6 +77,20 @@ export function requireOk<T>(result: ApiResult<T>, label: string): T {
   return result.body;
 }
 
+export async function loginForAccessToken(apiBaseUrl: string, email: string, password = DEMO_PASSWORD): Promise<string> {
+  const body = requireOk<{ accessToken?: string }>(
+    await requestJson(apiBaseUrl, '/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ email, password }),
+    }),
+    `login ${email}`,
+  );
+  if (!body.accessToken) {
+    throw new Error(`login ${email} did not return accessToken`);
+  }
+  return body.accessToken;
+}
+
 export function signAccessToken(userId: string, roles: RoleName[]): string {
   const rawPrivateKey = process.env.JWT_PRIVATE_KEY;
   if (!rawPrivateKey) {
@@ -113,22 +127,28 @@ export async function ensureUserWithRoles(
   const bcrypt = requireBackend<typeof import('bcrypt')>('bcrypt');
   const passwordHash = await bcrypt.hash(DEMO_PASSWORD, 8);
 
-  const user = await prisma.user.upsert({
-    where: { email },
-    update: {
-      fullName,
-      passwordHash,
-      studentCode: studentCode ?? undefined,
-      isActive: true,
-    },
-    create: {
-      email,
-      fullName,
-      passwordHash,
-      studentCode,
-      isActive: true,
-    },
-  });
+  const existingUser =
+    (await prisma.user.findUnique({ where: { email } })) ??
+    (studentCode ? await prisma.user.findUnique({ where: { studentCode } }) : null);
+  const user = existingUser
+    ? await prisma.user.update({
+        where: { id: existingUser.id },
+        data: {
+          email,
+          fullName,
+          studentCode: studentCode ?? undefined,
+          isActive: true,
+        },
+      })
+    : await prisma.user.create({
+        data: {
+          email,
+          fullName,
+          passwordHash,
+          studentCode,
+          isActive: true,
+        },
+      });
 
   await prisma.userRole.deleteMany({ where: { userId: user.id } });
   await prisma.userRole.createMany({

@@ -3,9 +3,14 @@
 
 $ErrorActionPreference = 'Stop'
 $base = 'http://localhost:3000'
-$dropDir   = Join-Path $PSScriptRoot '..\apps\backend\data\csv-drop'
-$archiveDir = Join-Path $PSScriptRoot '..\apps\backend\data\csv-archive'
-$qDir      = Join-Path $PSScriptRoot '..\apps\backend\data\csv-quarantine'
+$dataRoot = if ($env:UNIHUB_CSV_DATA_ROOT) {
+  $env:UNIHUB_CSV_DATA_ROOT
+} else {
+  Join-Path $PSScriptRoot '..\data'
+}
+$dropDir   = Join-Path $dataRoot 'csv-drop'
+$archiveDir = Join-Path $dataRoot 'csv-archive'
+$qDir      = Join-Path $dataRoot 'csv-quarantine'
 foreach ($d in @($dropDir, $archiveDir, $qDir)) {
   if (Test-Path $d) { Get-ChildItem $d -File | Remove-Item -Force }
   else { New-Item -ItemType Directory -Force -Path $d | Out-Null }

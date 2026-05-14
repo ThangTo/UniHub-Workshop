@@ -56,6 +56,7 @@ src/data/csv-archive/*
 # Build / cache
 .pnpm-debug.log*
 .nest/
+.expo/
 *.tsbuildinfo
 src/apps/backend/prisma/generated/
 

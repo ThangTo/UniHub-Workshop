@@ -33,44 +33,56 @@ export function LoginScreen() {
   }
 
   return (
-    <div className="flex min-h-full items-center justify-center bg-gradient-to-br from-brand-100 via-slate-50 to-white px-4 py-12">
-      <div className="card w-full max-w-md p-8">
-        <div className="mb-1 flex items-center gap-2">
-          <h1 className="text-2xl font-bold text-slate-900">UniHub Admin</h1>
-          <span className="badge bg-brand-50 text-brand-700">Quản trị</span>
+    <div className="flex min-h-screen flex-col items-center justify-center p-6">
+      <div className="card w-full max-w-md p-10 backdrop-blur-xl border-white/60">
+        <div className="mb-10 text-center">
+          <div className="mb-4 inline-flex items-center justify-center rounded-2xl bg-brand-50/50 p-4 shadow-inner ring-1 ring-brand-100">
+            <svg className="h-10 w-10 text-brand-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+            </svg>
+          </div>
+          <h1 className="mb-2 text-3xl font-extrabold tracking-tight text-slate-900">
+            UniHub Admin
+          </h1>
+          <p className="text-sm font-medium text-slate-500">
+            Hệ thống quản trị dành cho <span className="text-brand-600">Ban tổ chức</span>
+          </p>
         </div>
-        <p className="mb-6 text-sm text-slate-500">
-          Đăng nhập với tài khoản <code className="text-xs">ORGANIZER</code> hoặc{' '}
-          <code className="text-xs">SYS_ADMIN</code>.
-        </p>
-        <form onSubmit={onSubmit} className="space-y-4">
-          <div>
-            <label className="label">Email</label>
+        
+        <form onSubmit={onSubmit} className="space-y-6">
+          <div className="space-y-1.5">
+            <label className="block text-sm font-semibold text-slate-700 tracking-wide">Email quản trị</label>
             <input
               type="email"
               required
               autoComplete="email"
-              className="input"
+              className="input text-base py-3"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
+              placeholder="admin@unihub.local"
             />
           </div>
-          <div>
-            <label className="label">Mật khẩu</label>
+          <div className="space-y-1.5">
+            <label className="block text-sm font-semibold text-slate-700 tracking-wide">Mật khẩu</label>
             <input
               type="password"
               required
               autoComplete="current-password"
-              className="input"
+              className="input text-base py-3"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
+              placeholder="••••••••"
             />
           </div>
+          
           {error && (
-            <div className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>
+            <div className="rounded-xl border border-red-100 bg-red-50/50 p-4 text-sm font-medium text-red-600 backdrop-blur-sm">
+              {error}
+            </div>
           )}
-          <button type="submit" className="btn-primary w-full" disabled={submitting}>
-            {submitting ? 'Đang đăng nhập…' : 'Đăng nhập'}
+          
+          <button type="submit" className="btn-primary w-full py-3.5 text-base" disabled={submitting}>
+            {submitting ? 'Đang xác thực…' : 'Đăng nhập hệ thống'}
           </button>
         </form>
       </div>

@@ -105,46 +105,49 @@ export class CsvSyncService {
       return summary;
     }
 
-    // Postgres advisory lock — chống multi-instance.
-    const [{ locked }] = await this.prisma.$queryRaw<{ locked: boolean }[]>`
-      SELECT pg_try_advisory_lock(${LOCK_KEY}) AS locked
-    `;
-    if (!locked) {
-      this.logger.warn('runOnce skipped: another worker holds advisory lock');
-      return summary;
-    }
-
-    this.running = true;
-    try {
-      await this.ensureDirs();
-      const files = await this.listDropFiles();
-      summary.scanned = files.length;
-      this.logger.log(`Scanning ${files.length} CSV file(s) in ${this.config.csv.dropDir}`);
-
-      for (const file of files) {
-        try {
-          const result = await this.processFile(file);
-          if (result.status === 'RUNNING') {
-            // sentinel: skipped duplicate
-            summary.skipped.push(result.fileName);
-          } else {
-            summary.processed.push(result);
-          }
-        } catch (e) {
-          this.logger.error(`Unexpected error processing ${file}: ${(e as Error).message}`);
-          summary.processed.push({
-            fileName: path.basename(file),
-            status: ImportJobStatus.FAILED,
-            reason: `unexpected:${(e as Error).message}`,
-          });
+    await this.prisma.$transaction(
+      async (tx) => {
+        // Transaction-level advisory lock. Prisma uses a connection pool, so a session-level
+        // pg_advisory_lock can leak if unlock runs on a different pooled connection.
+        const [{ locked }] = await tx.$queryRaw<{ locked: boolean }[]>`
+          SELECT pg_try_advisory_xact_lock(${LOCK_KEY}) AS locked
+        `;
+        if (!locked) {
+          this.logger.warn('runOnce skipped: another worker holds advisory lock');
+          return;
         }
-      }
-    } finally {
-      this.running = false;
-      await this.prisma.$executeRaw`SELECT pg_advisory_unlock(${LOCK_KEY})`.catch((e) =>
-        this.logger.warn(`advisory_unlock failed: ${(e as Error).message}`),
-      );
-    }
+
+        this.running = true;
+        try {
+          await this.ensureDirs();
+          const files = await this.listDropFiles();
+          summary.scanned = files.length;
+          this.logger.log(`Scanning ${files.length} CSV file(s) in ${this.config.csv.dropDir}`);
+
+          for (const file of files) {
+            try {
+              const result = await this.processFile(file);
+              if (result.status === 'RUNNING') {
+                // sentinel: skipped duplicate
+                summary.skipped.push(result.fileName);
+              } else {
+                summary.processed.push(result);
+              }
+            } catch (e) {
+              this.logger.error(`Unexpected error processing ${file}: ${(e as Error).message}`);
+              summary.processed.push({
+                fileName: path.basename(file),
+                status: ImportJobStatus.FAILED,
+                reason: `unexpected:${(e as Error).message}`,
+              });
+            }
+          }
+        } finally {
+          this.running = false;
+        }
+      },
+      { maxWait: 5_000, timeout: 10 * 60_000 },
+    );
 
     summary.finishedAt = new Date();
     summary.durationMs = summary.finishedAt.getTime() - summary.startedAt.getTime();

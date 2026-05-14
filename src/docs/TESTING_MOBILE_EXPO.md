@@ -42,6 +42,8 @@ Dung mot trong hai cach:
 - Android: vao Google Play, cai `Expo Go`.
 - iPhone: vao App Store, cai `Expo Go`.
 
+Mobile app dang dung Expo SDK 54, tuong thich voi Expo Go hien tai.
+
 May tinh va dien thoai nen cung mot Wi-Fi.
 
 ### 2.3 Neu dung emulator
@@ -142,10 +144,11 @@ Can co mot sinh vien da `CONFIRMED` registration.
 
 ## 5. Start Expo App
 
-Tu thu muc `src`:
+Tu thu muc mobile app:
 
 ```powershell
-pnpm --filter @unihub/mobile start
+cd d:\HCMUS\Nam_3\HK2\TKPM\Project\UniHubWorkshop\src\apps\mobile
+npx expo start
 ```
 
 Expo CLI se hien QR cho development server.
@@ -159,7 +162,7 @@ Expo CLI se hien QR cho development server.
 Neu QR Expo khong load duoc:
 
 ```powershell
-pnpm --filter @unihub/mobile start -- --tunnel
+npx expo start --tunnel
 ```
 
 Luu y: tunnel chi giup load app JS. API URL van nen tro ve backend cua may tinh,
@@ -171,7 +174,7 @@ vi du `http://192.168.1.23:3000`.
 2. Chay:
 
 ```powershell
-pnpm --filter @unihub/mobile android
+npx expo start --android
 ```
 
 3. Trong app, API Base URL dung:
@@ -347,7 +350,7 @@ docker compose --profile all exec postgres psql -U unihub -d unihub -c "select t
 Thu:
 
 ```powershell
-pnpm --filter @unihub/mobile start -- --tunnel
+npx expo start --tunnel
 ```
 
 Hoac dam bao phone va may tinh cung Wi-Fi.
