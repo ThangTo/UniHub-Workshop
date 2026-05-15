@@ -63,177 +63,21 @@ Hệ thống được thiết kế theo **Modular Monolith** ở backend, kết 
 
 ### 2.1 Level 1 — System Context
 
-![C4 Level 1 - System Context](https://i.ibb.co/5x6Gshxy/c4-level-1-system-context.png)
-
-> Rendered PNG with white background. Local fallback: `blueprint/assets/diagrams-png/c4-level-1-system-context.png`. Mermaid source below is kept for editing.
-> Mermaid bên dưới là nguồn tương thích rộng để chỉnh sửa nhanh khi cần.
-
-```mermaid
-flowchart LR
-    student["Sinh viên<br/>Xem lịch, đăng ký, nhận QR"]
-    organizer["Ban tổ chức<br/>Quản trị workshop, xem thống kê"]
-    checkinStaff["Nhân sự check-in<br/>Quét QR tại cửa phòng"]
-    sysAdmin["System Admin<br/>Quản lý role, cấu hình"]
-
-    unihub["UniHub Workshop<br/>Hệ thống quản lý đăng ký & check-in workshop"]
-
-    legacySIS["Hệ thống sinh viên cũ<br/>Export CSV mỗi đêm 01:00, không có API"]
-    payGw["Cổng thanh toán mock<br/>Mô phỏng VNPay/Stripe"]
-    aiSvc["AI Provider mock<br/>Mô phỏng OpenAI/Gemini"]
-    smtp["SMTP Server<br/>Gửi email xác nhận"]
-
-    student -->|"HTTPS: xem & đăng ký"| unihub
-    organizer -->|"HTTPS: quản trị workshop"| unihub
-    checkinStaff -->|"HTTPS / offline sync: check-in"| unihub
-    sysAdmin -->|"HTTPS: vận hành hệ thống"| unihub
-
-    unihub -->|"File/SFTP: đọc CSV hàng đêm"| legacySIS
-    unihub -->|"HTTPS: charge/refund"| payGw
-    unihub -->|"HTTPS: tạo summary"| aiSvc
-    unihub -->|"SMTP: gửi email"| smtp
-```
+![C4 Level 1 - System Context](assets/diagrams/c4-level-1-system-context.svg)
 
 ### 2.2 Level 2 — Container
 
-![C4 Level 2 - Container Diagram](https://i.ibb.co/zhdMQ76f/c4-level-2-container.png)
+![C4 Level 2 - Container Diagram](assets/diagrams/c4-level-2-container.svg)
 
-> Rendered PNG with white background. Local fallback: `blueprint/assets/diagrams-png/c4-level-2-container.png`. Mermaid source below is kept for editing.
-> Mermaid bên dưới là nguồn tương thích rộng để chỉnh sửa nhanh khi cần.
-
-```mermaid
-flowchart LR
-    student["Sinh viên"]
-    organizer["Ban tổ chức"]
-    staff["Check-in Staff"]
-
-    subgraph unihub["UniHub Workshop"]
-        webStudent["Student Web<br/>React + Vite"]
-        webAdmin["Admin Web<br/>React + Vite"]
-        mobile["Check-in Mobile<br/>React Native + SQLite"]
-        api["Backend API<br/>NestJS / TypeScript"]
-        workers["Async Workers<br/>NestJS standalone"]
-        pg[("PostgreSQL 16<br/>Transactional data")]
-        redis[("Redis 7<br/>Rate limit, seats, cache, idempotency")]
-        mq[["RabbitMQ<br/>Event bus"]]
-        minio[("MinIO<br/>PDF upload, QR images")]
-    end
-
-    legacySIS["Legacy SIS<br/>CSV export"]
-    payGw["Mock Payment Gateway"]
-    aiSvc["Mock AI Provider"]
-    smtp["SMTP Server"]
-
-    student -->|"HTTPS"| webStudent
-    organizer -->|"HTTPS"| webAdmin
-    staff -->|"Native app"| mobile
-
-    webStudent -->|"REST + SSE / HTTPS"| api
-    webAdmin -->|"REST / HTTPS"| api
-    mobile -->|"REST batch sync / HTTPS"| api
-
-    api -->|"TypeORM / TCP"| pg
-    api -->|"ioredis / TCP"| redis
-    api -->|"Publish events / AMQP"| mq
-    api -->|"S3 API"| minio
-    api -->|"HTTPS via Circuit Breaker"| payGw
-    api -->|"SMTP"| smtp
-
-    workers -->|"Consume events / AMQP"| mq
-    workers -->|"Read/write / TCP"| pg
-    workers -->|"S3 API"| minio
-    workers -->|"HTTPS"| aiSvc
-    workers -->|"SMTP"| smtp
-    workers -->|"Cron 02:00 / file system"| legacySIS
-```
+<!-- > Mermaid bên dưới là nguồn tương thích rộng để chỉnh sửa nhanh khi cần. -->
 
 ---
 
 ## 3. High-Level Architecture Diagram
 
-![3. High-Level Architecture Diagram](https://i.ibb.co/bghsgF4p/design-03-3-high-level-architecture-diagram.png)
+![3. High-Level Architecture Diagram](assets/diagrams/design-03-3-high-level-architecture-diagram.svg)
 
-> Rendered PNG with white background. Local fallback: `assets/diagrams-png/design-03-3-high-level-architecture-diagram.png`. Mermaid source below is kept for editing.
-
-```mermaid
-flowchart LR
-    subgraph Clients
-        SW[Student Web]
-        AW[Admin Web]
-        M[Mobile Check-in]
-    end
-
-    subgraph EdgeLayer["Edge Layer"]
-        NGINX[Nginx<br/>TLS, static]
-        RL[Rate Limiter<br/>Token Bucket on Redis]
-    end
-
-    subgraph CoreBackend["Backend API"]
-        AUTH[Auth Module<br/>JWT + RBAC]
-        WS[Workshops Module]
-        REG[Registration Module<br/>Atomic seat allocation]
-        PAY[Payment Module<br/>Circuit Breaker + Idempotency]
-        CHK[Check-in Module<br/>Batch idempotent]
-        AI[AI Summary Module]
-        NOT[Notification Module<br/>Strategy: Email/InApp/Telegram]
-    end
-
-    subgraph Workers["Async Workers (RabbitMQ consumers + cron)"]
-        WK_AI[AI Worker]
-        WK_CSV[CSV Importer<br/>Cron 02:00]
-        WK_NOT[Notification Dispatcher]
-        WK_OUT[Outbox Relay]
-    end
-
-    subgraph DataLayer["Data Layer"]
-        PG[(PostgreSQL)]
-        RDS[(Redis)]
-        MQ{{RabbitMQ}}
-        OBJ[(MinIO)]
-    end
-
-    subgraph External
-        LEG[Legacy SIS<br/>CSV drop folder]
-        PGW[Mock Payment GW]
-        AISVC[Mock AI Provider]
-        SMTP[SMTP Server]
-    end
-
-    SW --> NGINX
-    AW --> NGINX
-    M  --> NGINX
-    NGINX --> RL --> CoreBackend
-
-    AUTH --> RDS
-    WS --> PG
-    WS --> RDS
-    REG --> PG
-    REG --> RDS
-    REG --> MQ
-    PAY --> RDS
-    PAY -.Circuit Breaker.-> PGW
-    PAY --> PG
-    PAY --> MQ
-    CHK --> PG
-    CHK --> RDS
-    AI --> OBJ
-    AI --> MQ
-    NOT --> MQ
-
-    MQ --> WK_AI
-    MQ --> WK_NOT
-    MQ --> WK_OUT
-    WK_AI --> AISVC
-    WK_AI --> OBJ
-    WK_AI --> PG
-    WK_NOT --> SMTP
-    WK_NOT --> PG
-    WK_CSV -.cron.-> LEG
-    WK_CSV --> PG
-    WK_OUT --> MQ
-
-    M -.offline.-> SQLITE[(SQLite local)]
-    SQLITE -.sync khi có mạng.-> CHK
-```
+<!-- > Mermaid source below is kept for editing. -->
 
 ### 3.1 Điểm tích hợp đặc biệt
 
@@ -871,7 +715,7 @@ Hệ thống chọn **RBAC** thay vì ABAC vì:
 - `OwnershipGuard` cho các endpoint `me` (`/registrations/me`, ...) — kiểm tra `resource.userId === jwt.sub`.
 
 ```ts
-@Controller('workshops')
+@Controller("workshops")
 export class WorkshopController {
   @Post()
   @Roles(Role.ORGANIZER)
@@ -984,7 +828,7 @@ const breaker = new CircuitBreaker(paymentClient.charge, {
   rollingCountBuckets: 10,
   volumeThreshold: 20, // tối thiểu 20 req để tính tỉ lệ lỗi
 });
-breaker.fallback(() => ({ status: 'unavailable', code: 'PAYMENT_DOWN' }));
+breaker.fallback(() => ({ status: "unavailable", code: "PAYMENT_DOWN" }));
 ```
 
 **Hành vi từng trạng thái**:

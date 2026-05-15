@@ -1,0 +1,183 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1900" height="1160" viewBox="0 0 1900 1160" role="img" aria-labelledby="title desc">
+  <title id="title">C4 Level 2 - Container Diagram - UniHub Workshop</title>
+  <desc id="desc">Container diagram showing web apps, mobile app, backend API, async workers, databases, queue, object storage, and external systems.</desc>
+  <defs>
+    <style>
+      .bg { fill: #f8fafc; }
+      .title { font: 700 34px Arial, sans-serif; fill: #0f172a; }
+      .subtitle { font: 400 18px Arial, sans-serif; fill: #475569; }
+      .boundary { fill: #ffffff; stroke: #64748b; stroke-width: 2.5; stroke-dasharray: 10 8; }
+      .actor { fill: #e0f2fe; stroke: #0284c7; stroke-width: 2.5; }
+      .app { fill: #dbeafe; stroke: #2563eb; stroke-width: 2.5; }
+      .service { fill: #dcfce7; stroke: #16a34a; stroke-width: 2.5; }
+      .data { fill: #fef3c7; stroke: #d97706; stroke-width: 2.5; }
+      .queue { fill: #fae8ff; stroke: #9333ea; stroke-width: 2.5; }
+      .external { fill: #fee2e2; stroke: #dc2626; stroke-width: 2.5; }
+      .box-title { font: 700 18px Arial, sans-serif; fill: #0f172a; }
+      .box-tech { font: 700 13px Arial, sans-serif; fill: #334155; }
+      .box-body { font: 400 13px Arial, sans-serif; fill: #475569; }
+      .boundary-title { font: 700 20px Arial, sans-serif; fill: #334155; }
+      .arrow { stroke: #475569; stroke-width: 2; fill: none; marker-end: url(#arrow); }
+      .arrow-soft { stroke: #64748b; stroke-width: 1.7; fill: none; marker-end: url(#arrow); stroke-dasharray: 7 5; }
+      .label { font: 600 12px Arial, sans-serif; fill: #1e293b; }
+      .label-bg { fill: #f8fafc; stroke: #cbd5e1; stroke-width: 1; rx: 5; }
+      .legend-title { font: 700 14px Arial, sans-serif; fill: #0f172a; }
+      .legend { font: 400 13px Arial, sans-serif; fill: #334155; }
+    </style>
+    <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M2,2 L10,6 L2,10 Z" fill="#475569"/>
+    </marker>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="7" stdDeviation="9" flood-color="#0f172a" flood-opacity="0.12"/>
+    </filter>
+  </defs>
+
+  <rect class="bg" width="1900" height="1160"/>
+  <text class="title" x="80" y="70">C4 Level 2 - Container Diagram</text>
+  <text class="subtitle" x="80" y="102">Phân rã UniHub Workshop thành các container chính, công nghệ đề xuất, và quan hệ giao tiếp.</text>
+
+  <g filter="url(#shadow)">
+    <rect class="actor" x="80" y="210" width="230" height="92" rx="16"/>
+    <text class="box-title" x="118" y="250">Sinh viên</text>
+    <text class="box-body" x="118" y="276">Browser mobile/desktop</text>
+  </g>
+  <g filter="url(#shadow)">
+    <rect class="actor" x="80" y="430" width="230" height="92" rx="16"/>
+    <text class="box-title" x="118" y="470">Ban tổ chức</text>
+    <text class="box-body" x="118" y="496">Internal admin users</text>
+  </g>
+  <g filter="url(#shadow)">
+    <rect class="actor" x="80" y="650" width="230" height="92" rx="16"/>
+    <text class="box-title" x="118" y="690">Check-in Staff</text>
+    <text class="box-body" x="118" y="716">Mobile device</text>
+  </g>
+
+  <rect class="boundary" x="405" y="160" width="1010" height="770" rx="28"/>
+  <text class="boundary-title" x="435" y="198">UniHub Workshop</text>
+
+  <g filter="url(#shadow)">
+    <rect class="app" x="470" y="240" width="240" height="116" rx="16"/>
+    <text class="box-title" x="506" y="282">Student Web</text>
+    <text class="box-tech" x="506" y="306">React + Vite</text>
+    <text class="box-body" x="506" y="330">Catalog, registration, QR</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect class="app" x="470" y="450" width="240" height="116" rx="16"/>
+    <text class="box-title" x="506" y="492">Admin Web</text>
+    <text class="box-tech" x="506" y="516">React + Vite</text>
+    <text class="box-body" x="506" y="540">CRUD, upload PDF, stats</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect class="app" x="470" y="660" width="240" height="126" rx="16"/>
+    <text class="box-title" x="506" y="704">Check-in Mobile</text>
+    <text class="box-tech" x="506" y="728">React Native + SQLite</text>
+    <text class="box-body" x="506" y="752">Scan QR, offline queue</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect class="service" x="820" y="355" width="270" height="160" rx="18"/>
+    <text class="box-title" x="866" y="405">Backend API</text>
+    <text class="box-tech" x="866" y="430">NestJS / TypeScript</text>
+    <text class="box-body" x="866" y="456">Auth, RBAC, registrations</text>
+    <text class="box-body" x="866" y="480">Payment, check-in, rate limit</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect class="service" x="820" y="650" width="270" height="145" rx="18"/>
+    <text class="box-title" x="866" y="698">Async Workers</text>
+    <text class="box-tech" x="866" y="723">NestJS standalone</text>
+    <text class="box-body" x="866" y="749">Outbox relay, CSV, AI</text>
+    <text class="box-body" x="866" y="773">Notification dispatch</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect class="data" x="1165" y="235" width="200" height="105" rx="16"/>
+    <text class="box-title" x="1205" y="276">PostgreSQL</text>
+    <text class="box-tech" x="1205" y="300">Transactional data</text>
+    <text class="box-body" x="1205" y="322">Users, registrations</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect class="data" x="1165" y="370" width="200" height="105" rx="16"/>
+    <text class="box-title" x="1205" y="411">Redis</text>
+    <text class="box-tech" x="1205" y="435">In-memory store</text>
+    <text class="box-body" x="1205" y="457">Rate limit, seats, cache</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect class="queue" x="1165" y="505" width="200" height="105" rx="16"/>
+    <text class="box-title" x="1205" y="546">RabbitMQ</text>
+    <text class="box-tech" x="1205" y="570">Event bus</text>
+    <text class="box-body" x="1205" y="592">Durable queues</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect class="data" x="1165" y="640" width="200" height="105" rx="16"/>
+    <text class="box-title" x="1205" y="681">MinIO</text>
+    <text class="box-tech" x="1205" y="705">S3-compatible</text>
+    <text class="box-body" x="1205" y="727">PDF, QR images</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect class="external" x="1525" y="210" width="270" height="104" rx="16"/>
+    <text class="box-title" x="1562" y="252">Legacy SIS</text>
+    <text class="box-body" x="1562" y="280">CSV export folder</text>
+  </g>
+  <g filter="url(#shadow)">
+    <rect class="external" x="1525" y="375" width="270" height="104" rx="16"/>
+    <text class="box-title" x="1562" y="417">Mock Payment GW</text>
+    <text class="box-body" x="1562" y="445">Charge, refund, webhook</text>
+  </g>
+  <g filter="url(#shadow)">
+    <rect class="external" x="1525" y="540" width="270" height="104" rx="16"/>
+    <text class="box-title" x="1562" y="582">Mock AI Provider</text>
+    <text class="box-body" x="1562" y="610">Generate summary</text>
+  </g>
+  <g filter="url(#shadow)">
+    <rect class="external" x="1525" y="705" width="270" height="104" rx="16"/>
+    <text class="box-title" x="1562" y="747">SMTP Server</text>
+    <text class="box-body" x="1562" y="775">Email delivery</text>
+  </g>
+
+  <path class="arrow" d="M310 256 L470 298"/>
+  <path class="arrow" d="M310 476 L470 508"/>
+  <path class="arrow" d="M310 696 L470 723"/>
+
+  <path class="arrow" d="M710 298 C765 315, 790 360, 820 400"/>
+  <path class="arrow" d="M710 508 C765 492, 790 462, 820 445"/>
+  <path class="arrow" d="M710 723 C770 692, 795 625, 820 500"/>
+
+  <path class="arrow" d="M1090 405 L1165 288"/>
+  <path class="arrow" d="M1090 430 L1165 422"/>
+  <path class="arrow" d="M1090 458 L1165 558"/>
+  <path class="arrow" d="M1090 485 L1165 692"/>
+
+  <path class="arrow" d="M1090 722 L1165 558"/>
+  <path class="arrow" d="M1090 705 L1165 288"/>
+  <path class="arrow" d="M1090 742 L1165 692"/>
+
+  <path class="arrow" d="M1365 557 C1445 520, 1480 592, 1525 592"/>
+  <path class="arrow" d="M1365 692 C1450 660, 1480 755, 1525 757"/>
+  <path class="arrow" d="M1090 680 C1260 610, 1400 245, 1525 262"/>
+  <path class="arrow" d="M1090 430 C1250 430, 1390 425, 1525 427"/>
+
+  <rect class="label-bg" x="735" y="320" width="106" height="26"/><text class="label" x="746" y="338">REST + SSE</text>
+  <rect class="label-bg" x="730" y="488" width="72" height="26"/><text class="label" x="742" y="506">REST</text>
+  <rect class="label-bg" x="716" y="650" width="130" height="26"/><text class="label" x="728" y="668">batch sync</text>
+  <rect class="label-bg" x="1098" y="334" width="76" height="26"/><text class="label" x="1110" y="352">SQL</text>
+  <rect class="label-bg" x="1096" y="430" width="76" height="26"/><text class="label" x="1108" y="448">Redis</text>
+  <rect class="label-bg" x="1100" y="532" width="76" height="26"/><text class="label" x="1112" y="550">AMQP</text>
+  <rect class="label-bg" x="1102" y="620" width="76" height="26"/><text class="label" x="1114" y="638">S3</text>
+
+  <g transform="translate(80 1040)">
+    <text class="legend-title" x="0" y="0">Legend</text>
+    <rect class="actor" x="0" y="18" width="22" height="16" rx="4"/><text class="legend" x="32" y="31">Actor</text>
+    <rect class="app" x="105" y="18" width="22" height="16" rx="4"/><text class="legend" x="137" y="31">Web/Mobile container</text>
+    <rect class="service" x="310" y="18" width="22" height="16" rx="4"/><text class="legend" x="342" y="31">Service container</text>
+    <rect class="data" x="495" y="18" width="22" height="16" rx="4"/><text class="legend" x="527" y="31">Data store</text>
+    <rect class="queue" x="635" y="18" width="22" height="16" rx="4"/><text class="legend" x="667" y="31">Message broker</text>
+    <rect class="external" x="815" y="18" width="22" height="16" rx="4"/><text class="legend" x="847" y="31">External system</text>
+  </g>
+</svg>
