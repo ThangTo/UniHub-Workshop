@@ -5,11 +5,14 @@ import type { WorkshopSummary } from '../lib/types';
 import { formatCurrency, formatDateTime } from '../lib/format';
 import clsx from 'clsx';
 
+const MIN_SUMMARY_LOADING_MS = 1200;
+
 export function WorkshopDetailAdminScreen() {
   const { id } = useParams<{ id: string }>();
   const [w, setW] = useState<WorkshopSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [selectedPdfName, setSelectedPdfName] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
@@ -68,7 +71,9 @@ export function WorkshopDetailAdminScreen() {
 
   async function uploadPdf(file: File) {
     if (!id) return;
+    setSelectedPdfName(file.name);
     setBusy('upload');
+    const loadingStartedAt = Date.now();
     try {
       const fd = new FormData();
       fd.append('file', file);
@@ -81,6 +86,7 @@ export function WorkshopDetailAdminScreen() {
     } catch (e) {
       alert(apiError(e, 'Upload PDF thất bại.'));
     } finally {
+      await waitForMinimumLoadingTime(loadingStartedAt, MIN_SUMMARY_LOADING_MS);
       setBusy(null);
       if (fileRef.current) fileRef.current.value = '';
     }
@@ -110,6 +116,8 @@ export function WorkshopDetailAdminScreen() {
       </div>
     );
   if (!w) return <div className="text-slate-500">Đang tải…</div>;
+
+  const isSummaryProcessing = busy === 'upload' || w.summaryStatus === 'PENDING';
 
   return (
     <div className="space-y-6">
@@ -152,17 +160,7 @@ export function WorkshopDetailAdminScreen() {
           <div className="card p-5">
             <div className="mb-3 flex items-center justify-between">
               <h2 className="text-base font-semibold">AI Summary</h2>
-              <span
-                className={clsx(
-                  'badge',
-                  w.summaryStatus === 'READY' && 'bg-emerald-100 text-emerald-800',
-                  w.summaryStatus === 'PENDING' && 'bg-amber-100 text-amber-700',
-                  w.summaryStatus === 'FAILED' && 'bg-red-100 text-red-700',
-                  w.summaryStatus === 'NONE' && 'bg-slate-100 text-slate-600',
-                )}
-              >
-                {w.summaryStatus}
-              </span>
+              <SummaryStatusBadge status={w.summaryStatus} loading={busy === 'upload'} />
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <input
@@ -174,8 +172,20 @@ export function WorkshopDetailAdminScreen() {
                   const f = e.target.files?.[0];
                   if (f) void uploadPdf(f);
                 }}
-                className="text-sm"
+                className="sr-only"
               />
+              <button
+                type="button"
+                className="btn-outline"
+                disabled={busy === 'upload'}
+                onClick={() => fileRef.current?.click()}
+              >
+                {busy === 'upload' && <Spinner className="mr-2 h-4 w-4" />}
+                {busy === 'upload' ? 'Đang tải lên…' : 'Chọn PDF'}
+              </button>
+              <span className="min-w-0 text-sm text-slate-600">
+                {summaryFileLabel(w.summaryStatus, selectedPdfName)}
+              </span>
               {w.summaryStatus === 'FAILED' && (
                 <button
                   className="btn-outline"
@@ -186,7 +196,7 @@ export function WorkshopDetailAdminScreen() {
                 </button>
               )}
             </div>
-            {w.summaryStatus === 'READY' && (
+            {w.summaryStatus === 'READY' && !isSummaryProcessing && (
               <div className="mt-4 space-y-3">
                 <p className="whitespace-pre-wrap text-sm leading-6 text-slate-700">
                   {w.summary}
@@ -200,10 +210,15 @@ export function WorkshopDetailAdminScreen() {
                 )}
               </div>
             )}
-            {w.summaryStatus === 'PENDING' && (
-              <p className="mt-3 text-xs text-slate-500">
-                Worker đang xử lý PDF — auto-refresh mỗi 3 giây.
-              </p>
+            {isSummaryProcessing && (
+              <ProcessingPanel
+                title={busy === 'upload' ? 'Đang tải PDF lên hệ thống' : 'Worker đang sinh AI summary'}
+                description={
+                  busy === 'upload'
+                    ? 'File sẽ được gửi lên MinIO rồi chuyển sang hàng đợi xử lý.'
+                    : 'Trang tự cập nhật mỗi 3 giây khi summary sẵn sàng.'
+                }
+              />
             )}
           </div>
         </div>
@@ -221,6 +236,78 @@ export function WorkshopDetailAdminScreen() {
         </aside>
       </div>
     </div>
+  );
+}
+
+function waitForMinimumLoadingTime(startedAt: number, minimumMs: number): Promise<void> {
+  const remainingMs = minimumMs - (Date.now() - startedAt);
+  if (remainingMs <= 0) return Promise.resolve();
+  return new Promise((resolve) => window.setTimeout(resolve, remainingMs));
+}
+
+function summaryFileLabel(status: WorkshopSummary['summaryStatus'], fileName: string | null): string {
+  if (status === 'PENDING') {
+    return fileName ? `Đang xử lý: ${fileName}` : 'PDF đã gửi, worker đang xử lý.';
+  }
+  if (status === 'READY') {
+    return fileName ? `Đã xử lý: ${fileName}` : 'Summary đã sẵn sàng.';
+  }
+  if (status === 'FAILED') {
+    return fileName ? `Xử lý lỗi: ${fileName}` : 'Xử lý PDF thất bại.';
+  }
+  return fileName ?? 'Chưa chọn PDF.';
+}
+
+function SummaryStatusBadge({
+  status,
+  loading,
+}: {
+  status: WorkshopSummary['summaryStatus'];
+  loading: boolean;
+}) {
+  const isLoading = loading || status === 'PENDING';
+  return (
+    <span
+      className={clsx(
+        'badge gap-1.5',
+        status === 'READY' && 'bg-emerald-100 text-emerald-800',
+        status === 'PENDING' && 'bg-amber-100 text-amber-700',
+        status === 'FAILED' && 'bg-red-100 text-red-700',
+        status === 'NONE' && 'bg-slate-100 text-slate-600',
+      )}
+    >
+      {isLoading && <Spinner className="h-3.5 w-3.5" />}
+      {status}
+    </span>
+  );
+}
+
+function ProcessingPanel({ title, description }: { title: string; description: string }) {
+  return (
+    <div className="mt-4 rounded-xl border border-amber-100 bg-amber-50/70 p-4">
+      <div className="flex items-start gap-3">
+        <Spinner className="mt-0.5 h-5 w-5 text-amber-600" />
+        <div className="min-w-0 flex-1">
+          <div className="text-sm font-semibold text-amber-900">{title}</div>
+          <p className="mt-1 text-xs leading-5 text-amber-800">{description}</p>
+          <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-amber-100">
+            <div className="h-full w-1/3 animate-[ai-progress_1.15s_ease-in-out_infinite] rounded-full bg-amber-500" />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Spinner({ className }: { className?: string }) {
+  return (
+    <span
+      aria-hidden="true"
+      className={clsx(
+        'inline-block animate-spin rounded-full border-2 border-current border-r-transparent',
+        className,
+      )}
+    />
   );
 }
 

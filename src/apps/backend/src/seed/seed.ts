@@ -5,13 +5,15 @@
  *   - 4 roles (BootstrapService cũng làm, nhưng idempotent upsert).
  *   - 1 SYS_ADMIN (BootstrapService cũng làm; ở đây skip nếu đã có).
  *   - 1 ORGANIZER, 1 CHECKIN_STAFF.
- *   - 5 students (MSSV) cho register flow.
- *   - 2 rooms, 2 speakers, 3 workshops (1 DRAFT, 2 PUBLISHED).
+ *   - 32 students (MSSV) cho register flow.
+ *   - 6 rooms, 8 speakers, 14 workshops (12 PUBLISHED, 2 DRAFT).
  *
  * Idempotent: chạy nhiều lần không lỗi.
  */
-import { PrismaClient } from '@prisma/client';
+import { PaymentStatus, PrismaClient, RegistrationStatus } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
+import Redis from 'ioredis';
+import { buildWorkshops, demoRegistrationPlans, rooms, speakers, students } from './seed-data';
 
 const prisma = new PrismaClient();
 
@@ -28,20 +30,15 @@ async function main() {
   console.log(`  ✓ Roles: ${roles.map((r) => r.name).join(', ')}`);
 
   // 2. Sample students (MSSV pre-loaded — needed for register flow)
-  const students = [
-    { code: '21120001', name: 'Nguyễn Văn A', faculty: 'CNTT', cohort: '2021' },
-    { code: '21120002', name: 'Trần Thị B',   faculty: 'CNTT', cohort: '2021' },
-    { code: '21120003', name: 'Lê Văn C',     faculty: 'KTPM', cohort: '2021' },
-    { code: '21120004', name: 'Demo Student 04', faculty: 'CNTT', cohort: '2021' },
-    { code: '21120005', name: 'Demo Student 05', faculty: 'CNTT', cohort: '2021' },
-    { code: '21120006', name: 'Demo Student 06', faculty: 'CNTT', cohort: '2021' },
-    { code: '22120004', name: 'Phạm Thị D',   faculty: 'CNTT', cohort: '2022' },
-    { code: '22120005', name: 'Hoàng Văn E',  faculty: 'HTTT', cohort: '2022' },
-  ];
   for (const s of students) {
     await prisma.student.upsert({
       where: { studentCode: s.code },
-      update: {},
+      update: {
+        fullName: s.name,
+        faculty: s.faculty,
+        cohort: s.cohort,
+        isActive: true,
+      },
       create: {
         studentCode: s.code,
         fullName: s.name,
@@ -94,94 +91,272 @@ async function main() {
   console.log(`  ✓ Users: ${organizer.email}, ${checkinStaff.email} (password: Test@12345)`);
 
   // 4. Rooms
-  const roomA = await prisma.room.upsert({
-    where: { code: 'A101' },
-    update: {},
-    create: { code: 'A101', name: 'Phòng A101 — Hội trường lớn', capacity: 200 },
-  });
-  const roomB = await prisma.room.upsert({
-    where: { code: 'B205' },
-    update: {},
-    create: { code: 'B205', name: 'Phòng B205 — Lab CNTT', capacity: 50 },
-  });
-  console.log(`  ✓ Rooms: ${roomA.code}, ${roomB.code}`);
+  const roomRecords = [];
+  for (const room of rooms) {
+    roomRecords.push(
+      await prisma.room.upsert({
+        where: { code: room.code },
+        update: { name: room.name, capacity: room.capacity },
+        create: room,
+      }),
+    );
+  }
+  const roomMap = new Map(roomRecords.map((room) => [room.code, room]));
+  console.log(`  ✓ Rooms: ${roomRecords.map((room) => room.code).join(', ')}`);
 
   // 5. Speakers
-  const existingSpeakers = await prisma.speaker.findMany({ where: { name: { in: ['TS. Nguyễn Văn Khoa', 'ThS. Lê Hoài An'] } } });
-  let speakerKhoa = existingSpeakers.find((s) => s.name === 'TS. Nguyễn Văn Khoa');
-  let speakerAn = existingSpeakers.find((s) => s.name === 'ThS. Lê Hoài An');
-  if (!speakerKhoa) {
-    speakerKhoa = await prisma.speaker.create({
-      data: { name: 'TS. Nguyễn Văn Khoa', title: 'Senior Engineer @ Google', bio: 'Chuyên gia ML/AI.' },
-    });
+  const speakerRecords = [];
+  for (const speaker of speakers) {
+    const existing = await prisma.speaker.findFirst({ where: { name: speaker.name } });
+    speakerRecords.push(
+      existing
+        ? await prisma.speaker.update({
+            where: { id: existing.id },
+            data: { title: speaker.title, bio: speaker.bio },
+          })
+        : await prisma.speaker.create({ data: speaker }),
+    );
   }
-  if (!speakerAn) {
-    speakerAn = await prisma.speaker.create({
-      data: { name: 'ThS. Lê Hoài An', title: 'CTO @ Startup XYZ', bio: 'Chuyên gia hệ thống phân tán.' },
-    });
-  }
-  console.log(`  ✓ Speakers: ${speakerKhoa.name}, ${speakerAn.name}`);
+  const speakerMap = new Map(speakerRecords.map((speaker) => [speaker.name, speaker]));
+  console.log(`  ✓ Speakers: ${speakerRecords.length} professional speakers`);
 
   // 6. Workshops
-  const now = new Date();
-  const inDays = (d: number, h = 9) => {
-    const x = new Date(now);
-    x.setDate(x.getDate() + d);
-    x.setHours(h, 0, 0, 0);
-    return x;
-  };
-
-  const workshops = [
-    {
-      title: 'Giới thiệu Machine Learning cho người mới bắt đầu',
-      description: 'Workshop nhập môn ML, từ linear regression đến neural network.',
-      speakerId: speakerKhoa.id,
-      roomId: roomA.id,
-      startAt: inDays(7, 9),
-      endAt: inDays(7, 12),
-      capacity: 100,
-      feeAmount: 0,
-      status: 'PUBLISHED' as const,
-    },
-    {
-      title: 'Hệ thống phân tán: Từ lý thuyết đến thực tiễn',
-      description: 'CAP theorem, microservices, event-driven architecture.',
-      speakerId: speakerAn.id,
-      roomId: roomB.id,
-      startAt: inDays(14, 14),
-      endAt: inDays(14, 17),
-      capacity: 40,
-      feeAmount: 50000,
-      status: 'PUBLISHED' as const,
-    },
-    {
-      title: 'Workshop nháp (DRAFT) — chưa publish',
-      description: 'Demo state DRAFT, chưa hiển thị public.',
-      speakerId: speakerKhoa.id,
-      roomId: roomB.id,
-      startAt: inDays(21, 9),
-      endAt: inDays(21, 11),
-      capacity: 30,
-      feeAmount: 0,
-      status: 'DRAFT' as const,
-    },
-  ];
-
+  const workshops = buildWorkshops();
+  const workshopRecords = [];
   for (const w of workshops) {
+    const speaker = speakerMap.get(w.speakerName);
+    const room = roomMap.get(w.roomCode);
+    if (!speaker || !room) {
+      throw new Error(`Missing seed relation for workshop "${w.title}"`);
+    }
+    const data = {
+      title: w.title,
+      description: w.description,
+      speakerId: speaker.id,
+      roomId: room.id,
+      startAt: w.startAt,
+      endAt: w.endAt,
+      capacity: w.capacity,
+      feeAmount: w.feeAmount,
+      status: w.status,
+      summaryStatus: w.summaryStatus ?? 'NONE',
+      summary: w.summary ?? null,
+      summaryHighlights: w.summaryHighlights ?? undefined,
+      createdBy: organizer.id,
+    };
     const existing = await prisma.workshop.findFirst({ where: { title: w.title } });
-    if (existing) continue;
-    await prisma.workshop.create({
-      data: { ...w, createdBy: organizer.id },
-    });
+    workshopRecords.push(
+      existing
+        ? await prisma.workshop.update({ where: { id: existing.id }, data })
+        : await prisma.workshop.create({ data }),
+    );
   }
-  console.log(`  ✓ Workshops: ${workshops.length} (2 PUBLISHED, 1 DRAFT)`);
+  const publishedCount = workshops.filter((w) => w.status === 'PUBLISHED').length;
+  const draftCount = workshops.filter((w) => w.status === 'DRAFT').length;
+  console.log(`  ✓ Workshops: ${workshops.length} (${publishedCount} PUBLISHED, ${draftCount} DRAFT)`);
+
+  // 7. Staff assignments for the first demo week
+  const assignmentWorkshops = workshopRecords
+    .filter((w) => w.status === 'PUBLISHED')
+    .sort((a, b) => a.startAt.getTime() - b.startAt.getTime())
+    .slice(0, 8);
+  await prisma.staffRoomAssignment.createMany({
+    data: assignmentWorkshops.map((w) => ({
+      staffId: checkinStaff.id,
+      workshopId: w.id,
+      roomId: w.roomId!,
+      startsAt: w.startAt,
+      endsAt: w.endAt,
+    })),
+    skipDuplicates: true,
+  });
+  console.log(`  ✓ Staff assignments: ${assignmentWorkshops.length} upcoming workshops`);
+
+  // 8. Demo student accounts + registrations/payments/check-ins
+  const studentRoleId = roleMap.get('STUDENT')!;
+  const studentByCode = new Map(students.map((student) => [student.code, student]));
+  const workshopByTitle = new Map(workshopRecords.map((workshop) => [workshop.title, workshop]));
+  const demoUsers = new Map<string, { id: string; email: string }>();
+
+  for (const s of students) {
+    const existing = await prisma.user.findUnique({ where: { studentCode: s.code } });
+    const email = existing?.email ?? `student.${s.code}@unihub.local`;
+    const user = existing
+      ? await prisma.user.update({
+          where: { id: existing.id },
+          data: {
+            passwordHash,
+            fullName: s.name,
+            isActive: true,
+          },
+        })
+      : await prisma.user.create({
+          data: {
+            email,
+            passwordHash,
+            fullName: s.name,
+            studentCode: s.code,
+            roles: { create: { roleId: studentRoleId } },
+          },
+        });
+    await prisma.userRole.createMany({
+      data: [{ userId: user.id, roleId: studentRoleId }],
+      skipDuplicates: true,
+    });
+    demoUsers.set(s.code, { id: user.id, email: user.email });
+  }
+
+  let confirmedRegistrations = 0;
+  let pendingRegistrations = 0;
+  let inactiveRegistrations = 0;
+  let paymentsSeeded = 0;
+  let checkinsSeeded = 0;
+
+  for (const plan of demoRegistrationPlans) {
+    const student = studentByCode.get(plan.studentCode);
+    const user = demoUsers.get(plan.studentCode);
+    const workshop = workshopByTitle.get(plan.workshopTitle);
+    if (!student || !user || !workshop) {
+      throw new Error(`Invalid demo registration plan: ${plan.studentCode} -> ${plan.workshopTitle}`);
+    }
+
+    const status = plan.status as RegistrationStatus;
+    const isActiveSeat = status === RegistrationStatus.CONFIRMED || status === RegistrationStatus.PENDING_PAYMENT;
+    const holdExpiresAt =
+      status === RegistrationStatus.PENDING_PAYMENT
+        ? new Date(Date.now() + 15 * 60 * 1000)
+        : status === RegistrationStatus.EXPIRED
+          ? new Date(Date.now() - 15 * 60 * 1000)
+          : null;
+    const confirmedAt = status === RegistrationStatus.CONFIRMED ? new Date() : null;
+    const cancelledAt =
+      status === RegistrationStatus.CANCELLED || status === RegistrationStatus.EXPIRED ? new Date() : null;
+
+    const existing = await prisma.registration.findUnique({
+      where: {
+        workshopId_studentId: {
+          workshopId: workshop.id,
+          studentId: user.id,
+        },
+      },
+    });
+    const registration = existing
+      ? await prisma.registration.update({
+          where: { id: existing.id },
+          data: {
+            status,
+            feeAmount: workshop.feeAmount,
+            holdExpiresAt,
+            confirmedAt,
+            cancelledAt,
+          },
+        })
+      : await prisma.registration.create({
+          data: {
+            workshopId: workshop.id,
+            studentId: user.id,
+            status,
+            feeAmount: workshop.feeAmount,
+            holdExpiresAt,
+            confirmedAt,
+            cancelledAt,
+          },
+        });
+
+    if (status === RegistrationStatus.CONFIRMED) confirmedRegistrations += 1;
+    else if (status === RegistrationStatus.PENDING_PAYMENT) pendingRegistrations += 1;
+    else inactiveRegistrations += 1;
+
+    if (plan.paymentStatus) {
+      const paymentStatus = plan.paymentStatus as PaymentStatus;
+      const idempotencyKey = `seed:${registration.id}:payment`;
+      const existingPayment = await prisma.payment.findUnique({ where: { idempotencyKey } });
+      const paymentData = {
+        registrationId: registration.id,
+        attemptNo: 1,
+        amount: workshop.feeAmount,
+        currency: 'VND',
+        gateway: 'mock-pg',
+        gatewayTxnId:
+          paymentStatus === PaymentStatus.SUCCESS || paymentStatus === PaymentStatus.REFUNDED
+            ? `seed_txn_${registration.id.slice(0, 12)}`
+            : null,
+        status: paymentStatus,
+        idempotencyKey,
+        requestHash: 'seeded-demo-payment'.padEnd(64, '0').slice(0, 64),
+        responseSnapshot: {
+          seeded: true,
+          studentCode: plan.studentCode,
+          workshopTitle: plan.workshopTitle,
+        },
+        failureReason: paymentStatus === PaymentStatus.FAILED ? 'Seeded failed payment demo' : null,
+      };
+      existingPayment
+        ? await prisma.payment.update({ where: { id: existingPayment.id }, data: paymentData })
+        : await prisma.payment.create({ data: paymentData });
+      paymentsSeeded += 1;
+    }
+
+    if (plan.checkedIn && status === RegistrationStatus.CONFIRMED) {
+      const idempotencyKey = `${registration.id}${checkinStaff.id}`.replace(/-/g, '').padEnd(64, '0').slice(0, 64);
+      await prisma.checkin.upsert({
+        where: { registrationId: registration.id },
+        update: {
+          scannedAt: new Date(),
+          deviceId: 'seed-checkin-device',
+          staffId: checkinStaff.id,
+          idempotencyKey,
+        },
+        create: {
+          registrationId: registration.id,
+          scannedAt: new Date(),
+          deviceId: 'seed-checkin-device',
+          staffId: checkinStaff.id,
+          idempotencyKey,
+        },
+      });
+      checkinsSeeded += 1;
+    }
+  }
+
+  await reconcileRedisSeats(
+    workshopRecords.map((workshop) => ({ id: workshop.id, capacity: workshop.capacity })),
+  );
+  console.log(
+    `  ✓ Demo registrations: ${confirmedRegistrations} CONFIRMED, ${pendingRegistrations} PENDING_PAYMENT, ${inactiveRegistrations} inactive`,
+  );
+  console.log(`  ✓ Demo payments/check-ins: ${paymentsSeeded} payments, ${checkinsSeeded} check-ins`);
 
   console.log('\n✅ Seed completed.');
   console.log('\nLogin credentials (password: Test@12345):');
   console.log('  - admin@unihub.local      [SYS_ADMIN]    (created by BootstrapService)');
   console.log('  - organizer@unihub.local  [ORGANIZER]');
   console.log('  - staff@unihub.local      [CHECKIN_STAFF]');
-  console.log('\nSample MSSVs for /auth/register: 21120001..21120006, 22120004..22120005');
+  console.log('\nSample MSSVs for /auth/register: 21120001..21120010, 22120001..22120008, 23120001..23120006, 24120001..24120008');
+  console.log('Demo student login format: student.<MSSV>@unihub.local / Test@12345');
+}
+
+async function reconcileRedisSeats(workshops: Array<{ id: string; capacity: number }>): Promise<void> {
+  const redisUrl = process.env.REDIS_URL;
+  if (!redisUrl) return;
+
+  const redis = new Redis(redisUrl, { maxRetriesPerRequest: 1, lazyConnect: true });
+  try {
+    await redis.connect();
+    for (const workshop of workshops) {
+      const active = await prisma.registration.count({
+        where: {
+          workshopId: workshop.id,
+          status: { in: [RegistrationStatus.CONFIRMED, RegistrationStatus.PENDING_PAYMENT] },
+        },
+      });
+      await redis.set(`seat:${workshop.id}`, String(Math.max(0, workshop.capacity - active)));
+    }
+  } catch (e) {
+    console.warn(`  ! Redis seat reconcile skipped: ${(e as Error).message}`);
+  } finally {
+    redis.disconnect();
+  }
 }
 
 main()

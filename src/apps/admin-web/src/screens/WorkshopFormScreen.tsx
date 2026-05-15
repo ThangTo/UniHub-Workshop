@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api, apiError } from '../lib/api';
 import type { CreateWorkshopInput, WorkshopSummary } from '../lib/types';
 import { fromLocalInput, toLocalInput } from '../lib/format';
+import { formatTimeDraft, isValidTime24h, normalizeTimeOnBlur } from '../lib/timeInput';
 
 export function WorkshopFormScreen({ mode }: { mode: 'create' | 'edit' }) {
   const { id } = useParams<{ id: string }>();
@@ -54,8 +55,13 @@ export function WorkshopFormScreen({ mode }: { mode: 'create' | 'edit' }) {
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
-    setSubmitting(true);
     setError(null);
+    const timeError = validateSchedule(form.startAt, form.endAt);
+    if (timeError) {
+      setError(timeError);
+      return;
+    }
+    setSubmitting(true);
     try {
       const payload = {
         ...form,
@@ -112,26 +118,16 @@ export function WorkshopFormScreen({ mode }: { mode: 'create' | 'edit' }) {
             />
           </div>
           <div className="grid gap-4 sm:grid-cols-2">
-            <div>
-              <label className="label">Bắt đầu</label>
-              <input
-                type="datetime-local"
-                className="input"
-                required
-                value={form.startAt}
-                onChange={(e) => update('startAt', e.target.value)}
-              />
-            </div>
-            <div>
-              <label className="label">Kết thúc</label>
-              <input
-                type="datetime-local"
-                className="input"
-                required
-                value={form.endAt}
-                onChange={(e) => update('endAt', e.target.value)}
-              />
-            </div>
+            <DateTimeField
+              label="Bắt đầu"
+              value={form.startAt}
+              onChange={(value) => update('startAt', value)}
+            />
+            <DateTimeField
+              label="Kết thúc"
+              value={form.endAt}
+              onChange={(value) => update('endAt', value)}
+            />
           </div>
           <div className="grid gap-4 sm:grid-cols-2">
             <div>
@@ -193,4 +189,70 @@ export function WorkshopFormScreen({ mode }: { mode: 'create' | 'edit' }) {
       </div>
     </div>
   );
+}
+
+function DateTimeField({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  onChange(value: string): void;
+}) {
+  const { date, time } = splitLocalDateTime(value);
+
+  return (
+    <div>
+      <label className="label">{label}</label>
+      <div className="grid grid-cols-[minmax(0,1fr)_7.5rem] gap-2">
+        <input
+          type="date"
+          className="input"
+          required
+          value={date}
+          onChange={(e) => onChange(joinLocalDateTime(e.target.value, time))}
+        />
+        <input
+          type="text"
+          className="input font-mono tabular-nums"
+          required
+          inputMode="numeric"
+          maxLength={5}
+          placeholder="22:00"
+          aria-label={`${label} - giờ 24h`}
+          value={time}
+          onChange={(e) => onChange(joinLocalDateTime(date, formatTimeDraft(e.target.value)))}
+          onBlur={(e) => onChange(joinLocalDateTime(date, normalizeTimeOnBlur(e.target.value)))}
+        />
+      </div>
+      <p className="mt-1 text-xs text-slate-500">Giờ 24h, ví dụ 09:30 hoặc 22:00.</p>
+    </div>
+  );
+}
+
+function splitLocalDateTime(value: string): { date: string; time: string } {
+  const [date = '', time = ''] = value.split('T');
+  return { date, time: time.slice(0, 5) };
+}
+
+function joinLocalDateTime(date: string, time: string): string {
+  if (!date && !time) return '';
+  return `${date}T${time}`;
+}
+
+function isCompleteLocalDateTime(value: string): boolean {
+  const { date, time } = splitLocalDateTime(value);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return false;
+  return isValidTime24h(time);
+}
+
+function validateSchedule(startAt: string, endAt: string): string | null {
+  if (!isCompleteLocalDateTime(startAt) || !isCompleteLocalDateTime(endAt)) {
+    return 'Vui lòng nhập đầy đủ ngày và giờ theo định dạng 24h HH:mm.';
+  }
+  if (new Date(startAt).getTime() >= new Date(endAt).getTime()) {
+    return 'Thời gian kết thúc phải sau thời gian bắt đầu.';
+  }
+  return null;
 }

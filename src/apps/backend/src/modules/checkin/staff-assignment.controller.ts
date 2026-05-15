@@ -77,6 +77,54 @@ export class StaffAssignmentController {
     return result;
   }
 
+  @Roles('ORGANIZER', 'SYS_ADMIN')
+  @Get('options')
+  async options(@CurrentUser() actor: AuthenticatedUser) {
+    const workshopWhere = actor.roles.includes('SYS_ADMIN')
+      ? {}
+      : { createdBy: actor.id };
+
+    const [staff, rooms, workshops] = await Promise.all([
+      this.prisma.user.findMany({
+        where: { roles: { some: { role: { name: 'CHECKIN_STAFF' } } }, isActive: true },
+        select: { id: true, fullName: true, email: true },
+        orderBy: { fullName: 'asc' },
+      }),
+      this.prisma.room.findMany({
+        select: { id: true, code: true, name: true, capacity: true },
+        orderBy: { code: 'asc' },
+      }),
+      this.prisma.workshop.findMany({
+        where: workshopWhere,
+        select: {
+          id: true,
+          title: true,
+          status: true,
+          startAt: true,
+          endAt: true,
+          roomId: true,
+          room: { select: { name: true } },
+        },
+        orderBy: { startAt: 'asc' },
+        take: 100,
+      }),
+    ]);
+
+    return {
+      staff,
+      rooms,
+      workshops: workshops.map((w) => ({
+        id: w.id,
+        title: w.title,
+        status: w.status,
+        startAt: w.startAt,
+        endAt: w.endAt,
+        roomId: w.roomId,
+        roomName: w.room?.name ?? null,
+      })),
+    };
+  }
+
   @Roles('ORGANIZER', 'SYS_ADMIN', 'CHECKIN_STAFF')
   @Get()
   async list(

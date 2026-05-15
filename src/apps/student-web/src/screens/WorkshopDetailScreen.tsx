@@ -3,6 +3,7 @@ import { useNavigate, useParams, Link } from 'react-router-dom';
 import { api, apiError, newIdempotencyKey } from '../lib/api';
 import type { WorkshopDetail } from '../lib/types';
 import { formatCurrency, formatDateRange } from '../lib/format';
+import { registrationErrorMessage } from '../lib/registrationError';
 
 export function WorkshopDetailScreen() {
   const { id } = useParams<{ id: string }>();
@@ -54,7 +55,7 @@ export function WorkshopDetailScreen() {
         state: { highlightId: r.data.registrationId },
       });
     } catch (e) {
-      setRegisterErr(apiError(e, 'Đăng ký thất bại — có thể đã hết ghế.'));
+      setRegisterErr(registrationErrorMessage(e));
     } finally {
       setRegistering(false);
     }

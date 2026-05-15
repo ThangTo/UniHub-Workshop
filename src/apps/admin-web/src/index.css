@@ -24,6 +24,18 @@ body {
   background-attachment: fixed;
 }
 
+@keyframes ai-progress {
+  0% {
+    transform: translateX(-140%);
+  }
+  55% {
+    transform: translateX(120%);
+  }
+  100% {
+    transform: translateX(320%);
+  }
+}
+
 @layer components {
   .btn {
     @apply inline-flex items-center justify-center rounded-xl px-5 py-2.5 text-sm font-semibold tracking-wide transition-all duration-300 focus:outline-none focus:ring-4 disabled:opacity-50 disabled:pointer-events-none active:scale-95;

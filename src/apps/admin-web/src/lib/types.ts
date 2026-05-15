@@ -89,6 +89,29 @@ export interface StaffAssignment {
   endsAt: string;
 }
 
+export interface StaffAssignmentOptions {
+  staff: Array<{
+    id: string;
+    fullName: string;
+    email: string;
+  }>;
+  rooms: Array<{
+    id: string;
+    code: string;
+    name: string;
+    capacity: number;
+  }>;
+  workshops: Array<{
+    id: string;
+    title: string;
+    status: WorkshopStatus;
+    startAt: string;
+    endAt: string;
+    roomId?: string | null;
+    roomName?: string | null;
+  }>;
+}
+
 export interface AdminRegistration {
   id: string;
   workshopId: string;
