@@ -31,7 +31,8 @@
     "db:seed": "pnpm --filter \"./apps/backend\" run seed",
     "demo:race": "pnpm --filter \"./apps/backend\" exec node -r ts-node/register/transpile-only ../../scripts/demo/race-condition.ts",
     "demo:idempotency": "pnpm --filter \"./apps/backend\" exec node -r ts-node/register/transpile-only ../../scripts/demo/idempotency.ts",
-    "demo:k6": "k6 run scripts/k6/registration-load.js"
+    "demo:k6": "k6 run scripts/k6/registration-load.js",
+    "demo:k6:12k": "k6 run scripts/k6/registration-12k-10m.js"
   },
   "devDependencies": {
     "prettier": "^3.3.3",

@@ -178,6 +178,12 @@ Script:
 scripts/k6/registration-load.js
 ```
 
+Script theo dung success criteria 12.000 SV / 10 phut:
+
+```text
+scripts/k6/registration-12k-10m.js
+```
+
 Can cai `k6`:
 
 ```powershell
@@ -256,6 +262,76 @@ Expected:
 - Backend khong crash.
 - Duoi tai cao, he thong tra `202 QUEUED`, `429 rate_limited`, `409 sold_out` thay vi loi bat thuong.
 - Metrics `/metrics` co queue/payment/seat signals.
+
+### 6.4 Chay dung kich ban 12.000 sinh vien / 10 phut
+
+Yeu cau de bai:
+
+- 12.000 luot truy cap/dang ky trong 10 phut dau.
+- 60% don vao 3 phut dau: 7.200 request / 180s = 40 request/giay.
+- 40% con lai trong 7 phut sau: 4.800 request / 420s = 80 request / 7 giay.
+
+Script:
+
+```powershell
+pnpm demo:k6:12k
+```
+
+Hoac:
+
+```powershell
+k6 run scripts/k6/registration-12k-10m.js
+```
+
+Bien moi truong bat buoc:
+
+```powershell
+$env:WORKSHOP_ID = "<published-workshop-id>"
+$env:TOKENS_FILE = ".\tokens.json"
+```
+
+Co the dung `STUDENT_TOKEN` de test qua tai API nhanh, nhung khi chi dung 1
+token thi do la nhieu request tu cung 1 sinh vien, khong phai bang chung cong
+bang giua nhieu sinh vien. De chung minh cong bang, nen dung `TOKENS_FILE` gom
+nhieu access token cua cac student khac nhau:
+
+```json
+[
+  "access-token-student-1",
+  "access-token-student-2",
+  "access-token-student-3"
+]
+```
+
+Kich ban k6 se xoay vong token theo virtual user va iteration:
+
+```text
+token = tokens[(__ITER + __VU) % tokens.length]
+```
+
+Moi request co `Idempotency-Key` rieng:
+
+```text
+k6-12k-<VU>-<ITER>-<timestamp>
+```
+
+Expected:
+
+- Tong request xap xi 12.000.
+- 3 phut dau co khoang 7.200 request.
+- 7 phut sau co khoang 4.800 request.
+- Cac response duoc xem la he thong xu ly co kiem soat: `201`, `202`, `409`, `429`, hoac `503 registration_queue_full`.
+- `202 QUEUED` chung minh backend bao ve luong dang ky bang queue khi qua tai cuc bo.
+- `429 rate_limited` chung minh client spam lien tuc bi chan.
+- `409 sold_out/already_registered` la conflict nghiep vu hop le, khong phai crash.
+- Khong co nhieu loi 5xx bat thuong.
+
+Lenh lay evidence sau khi chay:
+
+```powershell
+Invoke-WebRequest http://localhost:3000/metrics -UseBasicParsing
+docker compose --profile all exec postgres psql -U unihub -d unihub -c "select status, count(*) from registrations group by status;"
+```
 
 ## 7. Offline Check-in Demo Script
 
