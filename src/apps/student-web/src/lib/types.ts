@@ -26,7 +26,6 @@ export interface LoginResponse {
 }
 
 export type WorkshopStatus = 'DRAFT' | 'PUBLISHED' | 'CANCELLED' | 'ENDED' | 'COMPLETED';
-export type SummaryStatus = 'NONE' | 'PENDING' | 'READY' | 'FAILED';
 
 export interface WorkshopListItem {
   id: string;
@@ -43,9 +42,6 @@ export interface WorkshopListItem {
 
 export interface WorkshopDetail extends WorkshopListItem {
   description: string;
-  summary?: string | null;
-  summaryStatus: SummaryStatus;
-  highlights?: string[];
 }
 
 export type RegistrationStatus =

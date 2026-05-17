@@ -61,20 +61,17 @@ export class CheckinService {
       throw new NotFoundException('registration_not_found');
     }
     if (!staff.roles.includes('SYS_ADMIN')) {
-      const now = new Date();
       const assignment = await this.prisma.staffRoomAssignment.findFirst({
         where: {
           staffId: staff.id,
           workshopId: reg.workshopId,
           roomId: reg.workshop.roomId ?? undefined,
-          startsAt: { lte: now },
-          endsAt: { gte: now },
         },
       });
       if (!assignment) {
         throw new ForbiddenException({
           code: 'not_assigned',
-          message: 'staff không được phân công workshop/phòng này trong ca hiện tại',
+          message: 'staff không được phân công workshop/phòng này',
         });
       }
     }
@@ -95,6 +92,85 @@ export class CheckinService {
     };
   }
 
+  async myWorkshops(staff: AuthenticatedUser) {
+    if (staff.roles.includes('SYS_ADMIN')) {
+      const workshops = await this.prisma.workshop.findMany({
+        where: { status: { in: ['DRAFT', 'PUBLISHED', 'ENDED'] } },
+        include: { room: true, speaker: true },
+        orderBy: { startAt: 'asc' },
+        take: 100,
+      });
+      return {
+        items: workshops.map((workshop) => ({
+          id: workshop.id,
+          title: workshop.title,
+          description: workshop.description,
+          startAt: workshop.startAt,
+          endAt: workshop.endAt,
+          status: workshop.status,
+          roomName: workshop.room?.name ?? workshop.room?.code ?? null,
+          roomCode: workshop.room?.code ?? null,
+          speakerName: workshop.speaker?.name ?? null,
+          assignmentStartsAt: null,
+          assignmentEndsAt: null,
+        })),
+      };
+    }
+
+    const assignments = await this.prisma.staffRoomAssignment.findMany({
+      where: { staffId: staff.id },
+      include: {
+        workshop: { include: { room: true, speaker: true } },
+        room: true,
+      },
+      orderBy: { startsAt: 'asc' },
+    });
+
+    return {
+      items: assignments.map((assignment) => ({
+        id: assignment.workshop.id,
+        title: assignment.workshop.title,
+        description: assignment.workshop.description,
+        startAt: assignment.workshop.startAt,
+        endAt: assignment.workshop.endAt,
+        status: assignment.workshop.status,
+        roomName: assignment.room.name ?? assignment.workshop.room?.name ?? null,
+        roomCode: assignment.room.code ?? assignment.workshop.room?.code ?? null,
+        speakerName: assignment.workshop.speaker?.name ?? null,
+        assignmentStartsAt: assignment.startsAt,
+        assignmentEndsAt: assignment.endsAt,
+      })),
+    };
+  }
+
+  async workshopStudents(workshopId: string, staff: AuthenticatedUser) {
+    await this.assertCanCheckWorkshop(workshopId, staff);
+    const registrations = await this.prisma.registration.findMany({
+      where: { workshopId },
+      include: {
+        student: { select: { id: true, fullName: true, email: true, studentCode: true } },
+        checkin: { select: { scannedAt: true, deviceId: true, staff: { select: { fullName: true } } } },
+      },
+      orderBy: [{ status: 'asc' }, { createdAt: 'asc' }],
+      take: 500,
+    });
+
+    return {
+      items: registrations.map((registration) => ({
+        registrationId: registration.id,
+        studentId: registration.student.id,
+        studentName: registration.student.fullName,
+        studentCode: registration.student.studentCode,
+        email: registration.student.email,
+        registrationStatus: registration.status,
+        qrStatus: registration.checkin ? 'CONFIRMED' : 'NOT_CONFIRMED',
+        checkedInAt: registration.checkin?.scannedAt ?? null,
+        checkedBy: registration.checkin?.staff.fullName ?? null,
+        deviceId: registration.checkin?.deviceId ?? null,
+      })),
+    };
+  }
+
   /**
    * Batch check-in (specs/checkin.md §A,§C). Mỗi item xử lý độc lập:
    * - Verify QR (signature + window)
@@ -110,12 +186,11 @@ export class CheckinService {
     const duplicates: CheckinItemResult[] = [];
     const invalid: CheckinItemResult[] = [];
 
-    // Cache room assignments của staff trong giờ shift.
-    const now = new Date();
+    // Demo-friendly: kiểm tra staff có phân công workshop/phòng, không khóa theo giờ ca.
     const assignments = staff.roles.includes('SYS_ADMIN')
       ? null
       : await this.prisma.staffRoomAssignment.findMany({
-          where: { staffId: staff.id, startsAt: { lte: now }, endsAt: { gte: now } },
+          where: { staffId: staff.id },
         });
 
     for (const item of dto.items) {
@@ -172,12 +247,8 @@ export class CheckinService {
       };
     }
 
-    // Window kẹp [validFrom, validTo + 1h]
-    const validFromMs = payload.validFrom * 1000;
+    // Demo-friendly: không chặn check-in trước giờ workshop; JWT signature vẫn được kiểm tra.
     const validToMs = payload.validTo * 1000 + POST_END_GRACE_MS;
-    if (scannedMs < validFromMs) {
-      return { idempotencyKey: item.idempotencyKey, regId: payload.regId, result: 'not_yet_valid' };
-    }
     if (scannedMs > validToMs) {
       return { idempotencyKey: item.idempotencyKey, regId: payload.regId, result: 'expired' };
     }
@@ -221,7 +292,7 @@ export class CheckinService {
             idempotencyKey: item.idempotencyKey,
             regId: payload.regId,
             result: 'not_assigned',
-            message: 'staff không được phân công workshop này trong ca hiện tại',
+            message: 'staff không được phân công workshop này',
           };
         }
         return {
@@ -304,6 +375,25 @@ export class CheckinService {
         .exec();
     } catch {
       // metrics are best effort
+    }
+  }
+
+  private async assertCanCheckWorkshop(
+    workshopId: string,
+    staff: AuthenticatedUser,
+  ): Promise<void> {
+    if (staff.roles.includes('SYS_ADMIN')) return;
+    const assignment = await this.prisma.staffRoomAssignment.findFirst({
+      where: {
+        staffId: staff.id,
+        workshopId,
+      },
+    });
+    if (!assignment) {
+      throw new ForbiddenException({
+        code: 'not_assigned',
+        message: 'staff không được phân công workshop này',
+      });
     }
   }
 }

@@ -42,7 +42,7 @@ export class CatalogService {
     const limit = Math.min(filters.limit ?? 20, 100);
     const skip = (page - 1) * limit;
 
-    const cacheKey = `${CACHE_PREFIX}:list:${filters.day ?? 'all'}:p${page}:l${limit}`;
+    const cacheKey = `${CACHE_PREFIX}:public-list-v2:${filters.day ?? 'all'}:p${page}:l${limit}`;
     const cached = await this.safeRedisGet(cacheKey);
     if (cached) return JSON.parse(cached);
 
@@ -66,7 +66,7 @@ export class CatalogService {
     ]);
 
     // Ghép seatsLeft từ Redis
-    const items = await Promise.all(workshops.map((w) => this.toWorkshopResponse(w)));
+    const items = await Promise.all(workshops.map((w) => this.toPublicWorkshopResponse(w)));
 
     const result = { items, total, page, limit, totalPages: Math.ceil(total / limit) };
     await this.safeRedisSet(cacheKey, JSON.stringify(result), CACHE_TTL);
@@ -74,7 +74,7 @@ export class CatalogService {
   }
 
   async detail(id: string) {
-    const cacheKey = `${CACHE_PREFIX}:detail:${id}`;
+    const cacheKey = `${CACHE_PREFIX}:public-detail-v2:${id}`;
     const cached = await this.safeRedisGet(cacheKey);
     if (cached) return JSON.parse(cached);
 
@@ -84,7 +84,7 @@ export class CatalogService {
     });
     if (!w || w.status !== 'PUBLISHED') throw new NotFoundException('workshop_not_found');
 
-    const result = await this.toWorkshopResponse(w);
+    const result = await this.toPublicWorkshopResponse(w);
     await this.safeRedisSet(cacheKey, JSON.stringify(result), CACHE_TTL);
     return result;
   }
@@ -309,6 +309,15 @@ export class CatalogService {
           version: { increment: 1 },
         },
       });
+      if (dto.status === 'CANCELLED' && w.status !== 'CANCELLED') {
+        await tx.$executeRaw`
+        UPDATE "registrations"
+        SET "status" = 'CANCELLED'::"registration_status",
+            "updated_at" = now()
+        WHERE "workshop_id" = ${id}::uuid
+          AND "status" IN ('CONFIRMED'::"registration_status", 'PENDING_PAYMENT'::"registration_status")
+      `;
+      }
       await this.outbox.append(tx, {
         aggregate: 'workshop',
         aggregateId: id,
@@ -529,6 +538,25 @@ export class CatalogService {
       speakerName: workshop.speaker?.name ?? null,
       roomName: workshop.room?.name ?? workshop.room?.code ?? null,
       highlights,
+    };
+  }
+
+  private async toPublicWorkshopResponse(
+    workshop: Prisma.WorkshopGetPayload<{ include: { speaker: true; room: true } }>,
+  ) {
+    const seatsLeft = await this.getSeatsLeft(workshop.id, workshop.capacity);
+    return {
+      id: workshop.id,
+      title: workshop.title,
+      description: workshop.description,
+      startAt: workshop.startAt,
+      endAt: workshop.endAt,
+      capacity: workshop.capacity,
+      seatsLeft,
+      feeAmount: workshop.feeAmount,
+      status: workshop.status,
+      speakerName: workshop.speaker?.name ?? null,
+      roomName: workshop.room?.name ?? workshop.room?.code ?? null,
     };
   }
 

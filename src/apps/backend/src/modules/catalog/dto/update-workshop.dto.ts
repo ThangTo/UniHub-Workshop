@@ -1,4 +1,14 @@
-import { IsDateString, IsInt, IsOptional, IsString, IsUUID, MaxLength, Min } from 'class-validator';
+import { WorkshopStatus } from "@prisma/client";
+import {
+  IsDateString,
+  IsEnum,
+  IsInt,
+  IsOptional,
+  IsString,
+  IsUUID,
+  MaxLength,
+  Min,
+} from "class-validator";
 
 export class UpdateWorkshopDto {
   @IsString()
@@ -9,6 +19,10 @@ export class UpdateWorkshopDto {
   @IsString()
   @IsOptional()
   description?: string;
+
+  @IsEnum(WorkshopStatus)
+  @IsOptional()
+  status?: WorkshopStatus;
 
   @IsUUID()
   @IsOptional()

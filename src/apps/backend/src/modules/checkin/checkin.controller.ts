@@ -43,6 +43,21 @@ export class CheckinController {
     }
   }
 
+  @Roles('CHECKIN_STAFF', 'SYS_ADMIN')
+  @Get('checkin/my-workshops')
+  async myWorkshops(@CurrentUser() user: AuthenticatedUser) {
+    return this.svc.myWorkshops(user);
+  }
+
+  @Roles('CHECKIN_STAFF', 'SYS_ADMIN')
+  @Get('checkin/workshops/:id/students')
+  async workshopStudents(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.svc.workshopStudents(id, user);
+  }
+
   /**
    * Batch check-in (specs/checkin.md §A,§C). Idempotent qua header `Idempotency-Key`
    * (ở batch level) + `idempotencyKey` của mỗi item (UNIQUE trong DB).

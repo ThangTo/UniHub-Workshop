@@ -166,8 +166,15 @@ export class AppConfigService {
     return this.raw.get<string>('MOCK_PG_WEBHOOK_SECRET', 'mock-pg-secret');
   }
 
-  get mockAiUrl(): string {
-    return this.raw.get<string>('MOCK_AI_URL', 'http://localhost:4100');
+  get gemini(): { apiKey: string; model: string; baseUrl: string } {
+    return {
+      apiKey: this.raw.get<string>('GEMINI_API_KEY', ''),
+      model: this.raw.get<string>('GEMINI_MODEL', 'gemini-2.5-flash'),
+      baseUrl: this.raw.get<string>(
+        'GEMINI_API_BASE_URL',
+        'https://generativelanguage.googleapis.com/v1beta',
+      ),
+    };
   }
 
   // --- CSV ---
