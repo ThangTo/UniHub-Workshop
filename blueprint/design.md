@@ -451,7 +451,7 @@ jwt:blacklist:{jti}               BOOL  TTL=tokenExp
 
 > Rendered PNG with white background. Local fallback: `assets/diagrams-png/design-05-4-4-erd-tom-tat.png`. Mermaid source below is kept for editing.
 
-```mermaid
+<!-- ```mermaid
 erDiagram
     USERS ||--o{ USER_ROLES : "has"
     ROLES ||--o{ USER_ROLES : "granted"
@@ -466,7 +466,7 @@ erDiagram
     REGISTRATIONS ||--o| CHECKINS : "may have"
     PAYMENTS ||--o{ PAYMENT_REFUNDS : "may refund"
     STUDENTS ||..|| USERS : "matched by student_code"
-```
+``` -->
 
 ---
 
