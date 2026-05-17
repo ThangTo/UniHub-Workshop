@@ -47,11 +47,11 @@ Giải pháp chọn:
 | ----- | ---------------------------------------- | --------: | -------------: | ------------------- |
 | RL-01 | Per-IP toàn site                         |        60 |        30/phút | 429 + `Retry-After` |
 | RL-02 | Per-user authenticated toàn site         |       120 |        60/phút | 429                 |
-| RL-03 | Per-user trên `POST /registrations`      |         5 |      1/10 giây | 429                 |
-| RL-04 | Per-user trên `POST /payments`           |        10 |         5/phút | 429                 |
+| RL-03 | Per-user trên `POST /registrations`      |        10 |        1/giây  | 429                 |
+| RL-04 | Per-user trên `POST /payments`           |         5 |      30/phút   | 429                 |
 | RL-05 | Per-IP trên `POST /auth/login`           |        10 |         1/phút | 429                 |
 | RL-06 | Global trên `POST /registrations`        | 500 req/s | Sliding Window | 202 + queue FIFO    |
-| RL-07 | Per-user trên `POST /workshops/{id}/pdf` |         5 |         1/phút | 429                 |
+| RL-07 | Per-user trên `POST /workshops/{id}/pdf` |        10 |         1/phút | 429                 |
 
 ### C. Lua script Token Bucket
 
@@ -122,7 +122,7 @@ Response khi vào queue:
 
 ```ts
 @UseGuards(JwtAuthGuard, RolesGuard, RateLimitGuard)
-@RateLimit({ scope: 'user', bucket: 'registrations', capacity: 5, refillPerSec: 0.1 })
+@RateLimit({ scope: 'user', bucket: 'registrations', capacity: 10, refillPerSec: 1 })
 @Post('/registrations')
 create(...) {}
 ```
@@ -161,13 +161,14 @@ Guard set headers:
   - Redis down không làm toàn site sập; fallback in-memory chỉ là chế độ degrade.
   - Catalog đọc có thể fail-open có kiểm soát, nhưng đăng ký/thanh toán phải fail-closed hoặc giảm ngưỡng.
 - **Quan sát**:
-  - Metrics: `rate_limit_rejected_total{scope}`, `rate_limit_allowed_total{scope}`, `registration_queue_size`, `registration_queue_wait_ms`.
+  - Metrics hiện có: `rate_limit_rejected_total{scope}`, `rate_limit_allowed_total{scope}`.
+  - Queue registration theo dõi qua `processingId`, endpoint polling và log worker; có thể bổ sung metric `registration_queue_size` sau.
   - Log có `scope`, `userId/ip`, `retryAfterSec`, `processingId` nếu vào queue.
 
 ## Tiêu chí chấp nhận
 
-- [ ] AC-01: 1 user gửi 6 POST `/registrations` liên tiếp → 5 request đầu đi tiếp, lần 6 trả 429 với `Retry-After`.
-- [ ] AC-02: Sau 10 giây, user gửi tiếp → OK vì bucket refill 1 token.
+- [ ] AC-01: 1 user gửi 11 POST `/registrations` liên tiếp → 10 request đầu đi tiếp, lần 11 trả 429 với `Retry-After`.
+- [ ] AC-02: Sau 1 giây, user gửi tiếp → OK vì bucket refill 1 token.
 - [ ] AC-03: 1 IP gửi 100 request/phút vào catalog → 60 OK, 40 trả 429.
 - [ ] AC-04: Brute force `POST /auth/login` 11 lần/phút từ 1 IP → lần 11 trả 429.
 - [ ] AC-05: Load test k6 với 3000 vRPS/60s vào `/registrations` → backend không crash, request vượt global threshold nhận 202 và được xử lý FIFO.
@@ -175,4 +176,4 @@ Guard set headers:
 - [ ] AC-07: Headers `X-RateLimit-Remaining`, `X-RateLimit-Limit`, `Retry-After` xuất hiện đúng.
 - [ ] AC-08: Tắt Redis → fallback in-memory hoạt động và log cảnh báo cho SYS_ADMIN.
 - [ ] AC-09: Lua script atomic — 100 client cùng trừ bucket cap=10 → đúng 10 request thắng.
-- [ ] AC-10: Metrics `rate_limit_rejected_total{scope}` và `registration_queue_size` expose ở `/metrics`.
+- [ ] AC-10: Metrics `rate_limit_rejected_total{scope}` và `rate_limit_allowed_total{scope}` expose ở `/metrics`.

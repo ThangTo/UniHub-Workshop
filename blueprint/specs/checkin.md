@@ -22,7 +22,7 @@ sequenceDiagram
 
     Staff->>App: Quét QR
     App->>App: Verify JWT signature offline (RS256 public key)
-    App->>API: POST /checkin/batch<br/>Idempotency-Key=K<br/>{items: [{regId, scannedAt, deviceId, idempKey}]}
+    App->>API: POST /checkin/batch<br/>Idempotency-Key=K<br/>{items: [{qrToken, scannedAt, deviceId, idempotencyKey}]}
     API->>API: Verify role=CHECKIN_STAFF
     API->>API: Verify QR token (signature + validFrom/validTo)
     API->>DB: BEGIN
@@ -53,7 +53,7 @@ sequenceDiagram
     Staff->>App: Quét QR
     App->>App: Verify JWT signature offline
     alt Token hợp lệ + chưa hết hạn
-        App->>SQLite: INSERT checkin_queue<br/>(regId, scannedAt, deviceId, idempKey, synced=false)
+        App->>SQLite: INSERT pending_scans<br/>(qrToken, regId, scannedAt, deviceId, idempotencyKey, synced=false)
         App->>Staff: ✓ Đã ghi nhận (offline)
     else Token sai / hết hạn
         App->>Staff: ✗ QR không hợp lệ

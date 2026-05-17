@@ -11,7 +11,7 @@ Phiên bản 1.0 hỗ trợ:
 
 Sẵn sàng cắm thêm:
 
-- **Telegram** — chỉ cần thêm 1 class `TelegramChannel` implement interface chung và đăng ký vào factory.
+- **Telegram** — extension tương lai: thêm 1 class `TelegramChannel` implement interface chung và đăng ký vào registry/factory.
 
 ### Kiến trúc — Strategy / Adapter Pattern
 
@@ -32,7 +32,7 @@ classDiagram
 
     NotificationChannel <|.. EmailChannel
     NotificationChannel <|.. InAppChannel
-    NotificationChannel <|.. TelegramChannel
+    NotificationChannel <|.. TelegramChannel : extension
 
     class NotificationDispatcher {
         +channels: Map<string, NotificationChannel>
@@ -79,8 +79,8 @@ sequenceDiagram
             SMTP-->>W: 250 OK
         else IN_APP
             W->>Client: SSE push (nếu online)
-        else TELEGRAM
-            W->>W: gọi Telegram Bot API
+        else TELEGRAM (extension)
+            W->>W: gọi Telegram Bot API qua adapter tương lai
         end
         W->>DB: UPDATE notifications SENT, sent_at=now()
     end
@@ -93,11 +93,11 @@ sequenceDiagram
 | `registration_confirmed` | event `registration.confirmed`   | email + in_app        |
 | `payment_succeeded`      | event `payment.succeeded`        | email + in_app        |
 | `payment_failed`         | event `payment.failed`           | email                 |
-| `hold_expiring_soon`     | cron (5 phút trước hết hạn hold) | in_app                |
+| `registration_hold_created` | event `registration.hold_created` | email + in_app     |
 | `hold_expired`           | event `registration.expired`     | in_app                |
-| `workshop_updated`       | event `workshop.updated`         | email + in_app        |
+| `registration_cancelled` | event `registration.cancelled`   | email + in_app        |
 | `workshop_cancelled`     | event `workshop.cancelled`       | email + in_app        |
-| `checkin_confirmed`      | event `checkin.confirmed`        | in_app                |
+| `checkin_succeeded`      | event `checkin.confirmed`        | in_app                |
 | `csv_import_failed`      | event `csv.import_failed`        | email (chỉ SYS_ADMIN) |
 
 ### In-App Notification
@@ -122,7 +122,7 @@ sequenceDiagram
 | ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
 | SMTP timeout                                    | Retry 3 lần với exponential backoff (10s, 30s, 90s); sau đó mark `FAILED`, log                                                                     |
 | User chưa có email (có MSSV nhưng email NULL)   | Skip email channel, vẫn gửi in-app                                                                                                                 |
-| Telegram chat_id sai                            | Mark `FAILED`, không retry; có endpoint admin xem failed list                                                                                      |
+| Telegram chat_id sai (khi extension được bật)   | Mark `FAILED`, không retry; có endpoint admin xem failed list                                                                                      |
 | Worker chết giữa chừng dispatching              | Event vẫn ở RabbitMQ (manual ack); worker mới retry; idempotency: kiểm tra `notifications` đã tồn tại với `(user_id, template, channel, event_id)` |
 | Event MQ bị duplicate (do producer retry)       | Dispatcher idempotent: check trước khi tạo notification                                                                                            |
 | Client offline khi gửi in-app SSE               | Không sao — client lúc online sẽ `GET /notifications/me` thấy đầy đủ                                                                               |
@@ -150,7 +150,7 @@ sequenceDiagram
 - [ ] AC-02: ORGANIZER huỷ workshop → mọi SV đã đăng ký nhận thông báo trong < 5 phút.
 - [ ] AC-03: SMTP down → notification status `QUEUED → FAILED` sau 3 retry; log rõ ràng.
 - [ ] AC-04: SMTP phục hồi → retry job chạy lại notification `FAILED` có `attempts < 5`.
-- [ ] AC-05: Thêm 1 class `MockTelegramChannel` (tự viết khi demo) → chạy được mà không sửa Registration/Payment module → demo thêm channel mới.
+- [ ] AC-05 (extension): Thêm 1 class `MockTelegramChannel` → chạy được mà không sửa Registration/Payment module.
 - [ ] AC-06: SSE đẩy in-app notification trong < 2s khi user đang online.
 - [ ] AC-07: Worker chết → restart → notifications đã pending vẫn được gửi (không mất, không trùng).
 - [ ] AC-08: Spam control: 2 lần `registration.confirmed` cho cùng user/reg trong 60s → chỉ gửi 1 email.

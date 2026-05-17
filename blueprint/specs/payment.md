@@ -29,7 +29,7 @@ sequenceDiagram
 
     SV->>FE: Bấm "Thanh toán"
     FE->>FE: Sinh Idempotency-Key=K (UUID v4, lưu state)
-    FE->>API: POST /payments<br/>Header: Idempotency-Key=K<br/>{regId, amount, method:"qr"}
+    FE->>API: POST /payments<br/>Header: Idempotency-Key=K<br/>{registrationId, method:"qr"}
     API->>R: GET idem:payments:K
     alt cached
         R-->>API: snapshot
@@ -40,7 +40,7 @@ sequenceDiagram
     API->>DB: INSERT payment attempt (INITIATED, attempt_no=N, idem_key=K, request_hash)
     Note right of DB: UNIQUE idempotency_key + chỉ 1 SUCCESS / registration
 
-    API->>CB: charge(regId, amount)
+    API->>CB: charge(registrationId, amount từ workshop)
     alt CB OPEN
         CB-->>API: CircuitOpenError
         API->>DB: UPDATE payment FAILED (reason=circuit_open)
@@ -48,7 +48,7 @@ sequenceDiagram
         API->>R: SET idem:payments:K = snapshot(503, retry_after=30)
         API-->>FE: 503 payment_unavailable
     else CB CLOSED / HALF_OPEN
-        CB->>PG: POST /charge {regId, amount, idem=K}<br/>Timeout 3s
+        CB->>PG: POST /charge {regId, amount, idempotencyKey=K}<br/>Timeout 3s
         alt 200 SUCCESS
             PG-->>CB: {gatewayTxnId, status:SUCCESS}
             API->>DB: BEGIN
@@ -57,27 +57,27 @@ sequenceDiagram
             API->>DB: INSERT outbox payment.succeeded
             API->>DB: COMMIT
             API->>DB: UPDATE idempotency_keys completed=true, snapshot
-            API->>R: SET idem:payments:K = snapshot(200, {qrToken})
-            API-->>FE: 200 {qrToken, qrImageUrl}
+            API->>R: SET idem:payments:K = snapshot(201, {qrToken})
+            API-->>FE: 201 {status:"success", paymentId, qrToken, qrImageDataUrl}
         else 4xx (declined)
             PG-->>CB: {error: card_declined}
             API->>DB: UPDATE payment FAILED
             API->>DB: UPDATE idempotency_keys completed=true, snapshot
-            API->>R: SET idem:payments:K = snapshot(402)
-            API-->>FE: 402 payment_declined
+            API->>R: SET idem:payments:K = snapshot(201)
+            API-->>FE: 201 {status:"failed", paymentId}
         else timeout / 5xx
             CB->>CB: ghi failure
             API->>DB: UPDATE payment TIMEOUT
             API->>DB: UPDATE idempotency_keys completed=true, snapshot
             API->>R: SET idem:payments:K = snapshot(202, pending_reconcile)
-            API-->>FE: 202 payment_pending_reconcile
+            API-->>FE: 202 {status:"pending", paymentId}
         end
     end
 ```
 
-### B. Webhook callback từ Gateway
+### B. Webhook từ Gateway
 
-1. PG gọi `POST /payments/callback` với HMAC signature header.
+1. PG gọi `POST /payments/webhook` với HMAC signature header `X-Mock-Pg-Signature`.
 2. Backend verify HMAC bằng shared secret (env).
 3. Tra `payment` theo `gateway_txn_id` hoặc `idempotency_key` trong payload gateway.
 4. Cập nhật trạng thái idempotent: nếu đã `SUCCESS` → bỏ qua; nếu `TIMEOUT`/`PENDING`/`INITIATED` → `SUCCESS` + confirm registration.
@@ -93,10 +93,10 @@ sequenceDiagram
 
 ### D. Refund (huỷ workshop hoặc SV cancel)
 
-1. `POST /payments/{id}/refund` (internal, gọi từ workshop cancel hoặc registration cancel).
+1. Workshop cancel hoặc registration cancel gọi `PaymentRefundService.refundPayment(...)` trong backend, không mở public API riêng.
 2. INSERT `payment_refunds` row status `REQUESTED`.
-3. Gọi PG `POST /refund` qua Circuit Breaker; nếu CB Open → giữ row `REQUESTED` và retry khi Closed.
-4. Webhook refund-success → mark refund `SUCCESS`, payment `REFUNDED`.
+3. Gọi PG `POST /refund` qua Circuit Breaker; nếu CB Open → giữ row `REQUESTED` và retry bằng job nội bộ khi Closed.
+4. Khi refund thành công → mark refund `SUCCESS`, payment `REFUNDED`.
 
 ## Kịch bản lỗi
 
@@ -105,7 +105,7 @@ sequenceDiagram
 | Client retry POST /payments với cùng K, payload giống       | Trả snapshot cũ, **không gọi PG lần 2**                                                                             |
 | Client gửi cùng K nhưng payload khác                        | 422 `idempotency_key_reused`                                                                                        |
 | 2 request đồng thời cùng K                                  | DB UNIQUE chặn 1; request thua đợi 100ms rồi đọc snapshot                                                           |
-| Gateway timeout                                             | Status `TIMEOUT`; trả 202 `payment_pending_reconcile`; webhook/reconcile sẽ chốt, không gọi charge lại với cùng key |
+| Gateway timeout                                             | Status `TIMEOUT`; trả 202 `{status:"pending"}`; webhook/reconcile sẽ chốt, không gọi charge lại với cùng key        |
 | Gateway down kéo dài                                        | Circuit Open → fail-fast 503 → catalog/đăng ký free vẫn chạy                                                        |
 | Webhook đến trước khi /payments trả response                | Hợp lệ — webhook update đầu tiên, response của /payments idempotent đọc lại trạng thái                              |
 | Webhook bị tampering (sai HMAC)                             | 401 + log security event                                                                                            |
@@ -136,14 +136,14 @@ sequenceDiagram
 
 ## Tiêu chí chấp nhận
 
-- [ ] AC-01: Thanh toán thành công → registration `CONFIRMED` + `qrToken` cấp.
+- [ ] AC-01: Thanh toán thành công → API trả 201, registration `CONFIRMED` + `qrToken` cấp.
 - [ ] AC-02: Gửi 5 lần POST `/payments` với cùng Idempotency-Key + cùng payload → đúng **1 charge** ở Mock PG (kiểm tra log PG); mọi response giống nhau.
 - [ ] AC-03: Cùng Idempotency-Key + payload khác → 422.
 - [ ] AC-04: Bật `MOCK_PG_DOWN=true` ≥ 30s → Circuit Open, request mới trả 503 trong < 50ms; catalog vẫn chạy bình thường.
 - [ ] AC-05: Bật `MOCK_PG_DOWN=true` rồi tắt → Circuit Half-Open thử 1 request → đóng lại sau 3 success.
-- [ ] AC-06: Gateway timeout → API trả 202 `payment_pending_reconcile`; webhook đến sau → registration cuối cùng `CONFIRMED`.
+- [ ] AC-06: Gateway timeout → API trả 202 `{status:"pending"}`; webhook đến sau → registration cuối cùng `CONFIRMED`.
 - [ ] AC-07: Webhook sai HMAC → 401, không update gì.
-- [ ] AC-08: Workshop bị huỷ sau thanh toán → refund được kích hoạt; mark `REFUNDED` sau webhook refund.
+- [ ] AC-08: Workshop bị huỷ sau thanh toán → refund được kích hoạt; mark `REFUNDED` sau khi refund job/service thành công.
 - [ ] AC-09: Reconcile job phát hiện payment `TIMEOUT` mà PG đã `SUCCESS` → tự đồng bộ trong ≤ 10 phút.
 - [ ] AC-10: Endpoint `GET /system/health/payment` trả đúng trạng thái Circuit (`closed|open|half_open`).
 - [ ] AC-11: Payment attempt đầu `FAILED` → user thanh toán lại bằng key mới → tạo attempt mới, nhưng nếu một attempt đã `SUCCESS` thì attempt sau bị reject.

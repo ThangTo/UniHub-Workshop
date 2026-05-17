@@ -7,7 +7,7 @@ Cho phép `ORGANIZER` upload file PDF giới thiệu workshop. Hệ thống tự
 1. Lưu PDF vào MinIO.
 2. Trích xuất văn bản.
 3. Làm sạch (loại header/footer, normalize whitespace).
-4. Gọi AI Provider để sinh **bản tóm tắt 200–300 từ** + **5 bullet points highlights**.
+4. Gọi Gemini API để sinh **bản tóm tắt 180–280 từ** + **5 bullet points highlights**.
 5. Hiển thị tóm tắt trên trang chi tiết workshop cho SV.
 
 Toàn bộ pipeline **bất đồng bộ** (không block request upload).
@@ -27,7 +27,7 @@ sequenceDiagram
     participant DB
     participant MQ
     participant W as AI Worker
-    participant AI as Mock AI Provider
+    participant AI as Google Gemini API
 
     Org->>API: POST /workshops/{id}/pdf<br/>multipart/form-data
     API->>API: Validate (size ≤ 20MB, MIME=application/pdf, magic bytes)
@@ -39,17 +39,17 @@ sequenceDiagram
     else cache miss
         API->>Min: PUT object {key=workshops/{id}/{sha}.pdf}
         API->>DB: UPDATE workshop set pdf_object_key, pdf_sha256, summary_status=PENDING
-        API->>DB: INSERT outbox pdf.uploaded
+        API->>DB: INSERT outbox workshop.pdf.uploaded
         API-->>Org: 202 {summaryStatus: "PENDING"}
         Note over MQ,W: Outbox Relay đẩy event sau commit
-        MQ->>W: pdf.uploaded {workshopId, objectKey, sha}
+        MQ->>W: workshop.pdf.uploaded {workshopId, objectKey, sha}
         W->>Min: GET object
-        W->>W: pdf-parse → extract text
+        W->>W: pdfjs-dist/extractPdfText → extract text
         W->>W: clean (remove pages with > 80% non-text, normalize whitespace)
         alt text quá ngắn (< 100 từ)
             W->>DB: UPDATE summary_status=FAILED, error="text_too_short"
         else
-            W->>AI: POST /summarize {text, maxWords:300}<br/>Timeout 30s, retry 3x
+            W->>AI: POST /models/{model}:generateContent {text, schema}<br/>Timeout 30s, retry 3x
             alt success
                 AI-->>W: {summary, highlights}
                 W->>DB: UPSERT ai_summary_cache(pdf_sha256, summary, highlights)
@@ -84,16 +84,16 @@ sequenceDiagram
 | ---------------------------------------------- | ----------------------------------------------------------------------------------- |
 | File quá lớn (>20MB)                           | 413 `file_too_large`                                                                |
 | Sai MIME / magic bytes                         | 415 `unsupported_media_type`                                                        |
-| File chứa mã độc / corrupt                     | pdf-parse throw → mark `FAILED`                                                     |
+| File chứa mã độc / corrupt                     | PDF extractor throw → mark `FAILED`                                                 |
 | PDF chỉ có ảnh (scan)                          | Không OCR ở phiên bản 1.0 → mark `FAILED` với hint "PDF không có text"              |
-| AI provider timeout                            | Retry 3 lần (10s, 30s, 90s) → fail                                                  |
-| AI provider trả nội dung > 300 từ              | Truncate hoặc retry với prompt nghiêm hơn                                           |
-| AI provider trả nội dung tục/phản cảm          | Filter cơ bản (regex blocklist), nếu vẫn đáng nghi → mark `FAILED` chờ admin review |
+| Gemini timeout / 5xx / network error           | Retry 3 lần (10s, 30s, 90s) → fail                                                  |
+| Thiếu/sai `GEMINI_API_KEY` hoặc Gemini 4xx      | Không retry; mark `FAILED` để người vận hành sửa cấu hình/quota                     |
+| Gemini trả JSON sai schema                     | Validate response schema; nếu không hợp lệ → mark `FAILED`                          |
 | MinIO down lúc upload                          | 503 `storage_unavailable`                                                           |
 | MinIO down lúc worker đọc                      | Retry với backoff                                                                   |
 | Worker chết giữa lúc xử lý                     | RabbitMQ manual ack — không ack nếu chưa xong → message redeliver                   |
 | Network slow → upload mất 2 phút               | Cho phép, response 202 được trả ngay; xử lý tiếp tục async                          |
-| Admin upload PDF mới khi summary cũ chưa ready | Cancel job cũ (set status PENDING_NEW), xử lý file mới                              |
+| Admin upload PDF mới khi summary cũ chưa ready | Ghi `pdfSha256`/`pdfObjectKey` mới và enqueue job mới; khi demo nên chờ job trước xong để tránh nhiễu quan sát |
 
 ## Ràng buộc
 
@@ -114,10 +114,10 @@ sequenceDiagram
 ## Tiêu chí chấp nhận
 
 - [ ] AC-01: Upload PDF 5MB → API trả 202 trong < 5s.
-- [ ] AC-02: Sau ≤ 30s, `GET /workshops/{id}` trả `summaryStatus=READY` với `summary` 200–300 từ.
+- [ ] AC-02: Sau ≤ 30s, `GET /workshops/{id}` trả `summaryStatus=READY` với `summary` 180–280 từ.
 - [ ] AC-03: Upload file >20MB → 413.
 - [ ] AC-04: Upload file giả PDF (đổi đuôi từ .exe) → 415.
-- [ ] AC-05: Bật `MOCK_AI_DOWN=true` → worker retry 3 lần → mark `FAILED`; trang SV vẫn xem được, hiển thị description gốc.
+- [ ] AC-05: Thiếu/sai `GEMINI_API_KEY` hoặc Gemini trả lỗi không retry được → mark `FAILED`; trang SV vẫn xem được, hiển thị description gốc.
 - [ ] AC-06: Upload cùng file PDF (cùng SHA) cho 2 workshop khác nhau → workshop thứ 2 dùng lại summary, không gọi AI.
 - [ ] AC-07: Worker chết giữa chừng → restart → message redeliver → hoàn thành đúng.
 - [ ] AC-08: Admin retry summary failed → status `PENDING` rồi `READY`.

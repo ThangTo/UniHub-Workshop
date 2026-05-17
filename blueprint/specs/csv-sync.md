@@ -61,7 +61,7 @@ sequenceDiagram
                 end
                 W->>DB: BEGIN
                 W->>DB: INSERT INTO students FROM staging<br/>ON CONFLICT (student_code) DO UPDATE
-                W->>DB: TRUNCATE students_staging
+                W->>DB: DELETE students_staging WHERE import_job_id=?
                 W->>DB: COMMIT
                 W->>DB: UPDATE import_jobs SUCCESS (or PARTIAL if failed_rows>0)
                 W->>A: move file to archive
@@ -139,7 +139,7 @@ WHERE students.source_exported_at IS NULL
 
 - **Không downtime**:
   - Không khoá bảng `students`.
-  - UPSERT theo batch 1000 dòng, không single transaction toàn file.
+  - Parse/insert staging theo batch 1000 dòng; UPSERT từ staging được scope theo `import_job_id`.
 - **Tính nhất quán**:
   - SHA-256 đảm bảo không import 2 lần.
   - Idempotent UPSERT.
@@ -164,7 +164,7 @@ WHERE students.source_exported_at IS NULL
 - [ ] AC-05: Cron 02:00 chạy tự động (test với cron mỗi 1 phút).
 - [ ] AC-06: `POST /admin/csv-sync/run` trả 202 và trigger ngay lập tức.
 - [ ] AC-07: SV đã có registration → CSV update `is_active=false` → SV login OK nhưng đăng ký workshop mới bị reject.
-- [ ] AC-08: 2 worker chạy đồng thời → 1 chạy, 1 đợi (advisory lock); không có duplicate insert.
+- [ ] AC-08: 2 worker chạy đồng thời → 1 chạy, 1 skip vì `pg_try_advisory_xact_lock`; không có duplicate insert.
 - [ ] AC-09: File 30K dòng → xử lý < 60s, RAM peak < 200MB.
 - [ ] AC-10: Job đang chạy → backend API vẫn phục vụ request bình thường (no lock contention).
 - [ ] AC-11: Import file ngày mới rồi drop lại file cũ → dữ liệu trong `students` không bị rollback về bản cũ.

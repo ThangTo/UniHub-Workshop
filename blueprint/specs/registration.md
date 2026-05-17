@@ -46,7 +46,7 @@ sequenceDiagram
     API->>DB: COMMIT
     API->>R: SET idem:registrations:K = snapshot(201)
     API->>R: DEL hold:W:SV
-    API-->>SV: 201 {regId, qrToken, qrImageUrl}
+    API-->>SV: 201 {regId, qrToken, qrImageDataUrl}
 ```
 
 ### B. Đăng ký workshop có phí (giai đoạn giữ ghế)
@@ -114,7 +114,7 @@ QR token là JWT ký RS256:
 }
 ```
 
-QR image render từ token bằng `qrcode` lib, lưu MinIO (presigned URL TTL 24h).
+QR image render từ token bằng `qrcode` lib và trả trực tiếp dạng `qrImageDataUrl` trong response.
 
 ## Kịch bản lỗi
 

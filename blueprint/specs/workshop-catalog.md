@@ -15,7 +15,7 @@ Tính năng cho phép:
 3. Cache miss → query PostgreSQL với JOIN `workshops` + `rooms` + `speakers`, `WHERE status='PUBLISHED'`.
 4. Mỗi workshop ghép thêm `seatsLeft` từ Redis `seat:{workshopId}` (atomic counter).
 5. Response cache + trả client.
-6. Client subscribe SSE `GET /workshops/stream` để nhận update `seatsLeft` real-time mỗi 2 giây.
+6. Client subscribe SSE `GET /workshops/stream` để nhận snapshot `{workshopId: seatsLeft}` real-time mỗi 2 giây.
 
 ### B. Sinh viên xem chi tiết
 
@@ -46,7 +46,7 @@ Tính năng cho phép:
 1. `PATCH /workshops/{id}` với optimistic lock (`If-Match: version=N`).
 2. Backend so `version` ở DB; nếu khác → 409 `concurrent_modification`.
 3. Update DB + tăng version.
-4. Nếu thay đổi ảnh hưởng SV đã đăng ký (đổi giờ/phòng/huỷ) → publish event `workshop.updated` → notification worker gửi thông báo cho mọi SV đã đăng ký.
+4. Publish event `workshop.updated` để lưu luồng thay đổi/extension; phiên bản hiện tại gửi notification hàng loạt cho case huỷ workshop qua `workshop.cancelled`.
 5. Invalidate cache.
 
 ### F. ORGANIZER huỷ workshop
@@ -55,7 +55,7 @@ Tính năng cho phép:
 2. Đổi `status → CANCELLED`.
 3. Tự động:
    - Mọi `registrations` `CONFIRMED|PENDING_PAYMENT` chuyển `CANCELLED`.
-   - Refund cho registration đã `SUCCESS` payment (gọi `POST /payments/{id}/refund` qua Circuit Breaker).
+   - Refund cho registration đã `SUCCESS` payment qua `PaymentRefundService` và retry job nội bộ.
    - Publish `workshop.cancelled` → notification.
 4. SET `seat:{id} = 0` (không cho đăng ký mới).
 
@@ -69,7 +69,7 @@ Tính năng cho phép:
 | Huỷ workshop có nhiều SV đã thanh toán | Refund từng người; lỗi refund được retry, không chặn huỷ; thông báo SV |
 | Redis seat counter bị mất | Job rebuild đếm từ DB: `seat = capacity - count(registrations CONFIRMED|PENDING_PAYMENT)` |
 | Cache stale (Admin update nhưng cache chưa invalidate) | TTL 5 phút auto refresh; thêm `version` trong key để force invalidate |
-| SSE connection rớt | Client tự reconnect với `Last-Event-Id` |
+| SSE connection rớt | Client tự reconnect và nhận snapshot mới sau tối đa 2 giây |
 | Workshop hết hạn (`end_at < now`) | Tự động chuyển `ENDED` mỗi 5 phút bằng cron |
 
 ## Ràng buộc

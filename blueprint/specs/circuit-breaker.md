@@ -44,12 +44,6 @@ const breaker = new CircuitBreaker(paymentClient.charge.bind(paymentClient), {
   name: 'payment-gateway',
 });
 
-breaker.fallback((err) => ({
-  status: 'unavailable',
-  code: 'PAYMENT_DOWN',
-  retryAfterSec: 30,
-}));
-
 breaker.on('open', () => metrics.gauge('payment.circuit_state', 1));
 breaker.on('halfOpen', () => metrics.gauge('payment.circuit_state', 0.5));
 breaker.on('close', () => metrics.gauge('payment.circuit_state', 0));
@@ -96,7 +90,7 @@ flowchart TD
 
 - Module nghiệp vụ khác **không gọi đồng bộ** vào `PaymentService`.
 - Các side-effect hậu thanh toán/refund/notification đi qua **event** (RabbitMQ) — async, có thể chậm nhưng không block request chính.
-- Frontend đọc `GET /system/health/payment` (cached 5s) để biết tình trạng → hiển thị banner "Cổng thanh toán đang bảo trì" + ẩn nút thanh toán → không cho user thử và lỗi.
+- UI hoặc script demo có thể đọc `GET /system/health/payment` (cached 5s) để biết tình trạng và hiển thị/hướng dẫn "Cổng thanh toán đang bảo trì" khi cần.
 
 ### E. Hành vi từng nhánh khi Circuit Open
 
@@ -106,7 +100,7 @@ flowchart TD
 | Đăng ký miễn phí (`POST /registrations` workshop fee=0) | ✅ Bình thường                                                              |
 | Đăng ký có phí (`POST /registrations` workshop fee>0)   | ✅ Tạo `PENDING_PAYMENT` với hold ngắn (5 phút thay vì 15); banner cảnh báo |
 | Thanh toán (`POST /payments`)                           | ❌ 503 `payment_unavailable` ngay (< 50ms); UI hướng dẫn thử lại sau        |
-| Webhook callback (`POST /payments/callback`)            | ✅ Vẫn nhận (không gọi ra ngoài, chỉ ghi DB)                                |
+| Webhook (`POST /payments/webhook`)                      | ✅ Vẫn nhận (không gọi ra ngoài, chỉ ghi DB)                                |
 | Check-in                                                | ✅ Bình thường                                                              |
 | AI Summary                                              | ✅ Bình thường                                                              |
 | CSV Sync                                                | ✅ Bình thường                                                              |
@@ -139,8 +133,8 @@ flowchart TD
 Metrics expose tại `/metrics`:
 
 - `payment_circuit_state{name}` (gauge: 0=Closed, 0.5=HalfOpen, 1=Open)
-- `payment_request_total{status="success|failure|timeout|short_circuit"}` (counter)
-- `payment_latency_seconds` (histogram)
+- `payments_total{status="SUCCESS|REFUNDED"}` (gauge)
+- `payment_failure_total` (counter)
 
 Endpoint `GET /system/health/payment` trả:
 
@@ -163,6 +157,6 @@ Endpoint `GET /system/health/payment` trả:
 - [ ] AC-06: Tắt `MOCK_PG_DOWN=false` → sau 30s, Circuit chuyển Half-Open → 3 request đầu thành công → Closed.
 - [ ] AC-07: Half-Open thử request thất bại → quay về Open ngay, đợi thêm 30s.
 - [ ] AC-08: Endpoint `GET /system/health/payment` trả đúng trạng thái circuit.
-- [ ] AC-09: Frontend ẩn nút "Thanh toán" khi `circuit=open` (cache 5s).
+- [ ] AC-09: Demo/script đọc `GET /system/health/payment` thấy `circuit=open` và hiển thị/hướng dẫn trạng thái bảo trì thanh toán.
 - [ ] AC-10: Metrics `payment_circuit_state` chuyển đúng theo state; `/metrics` Prometheus scrape được.
 - [ ] AC-11: Demo bằng load test: bật DOWN trong 60s, hệ thống phục vụ 3000 RPS các endpoint khác không bị ảnh hưởng (latency p95 không tăng > 20%).

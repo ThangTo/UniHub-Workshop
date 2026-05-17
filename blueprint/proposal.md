@@ -62,7 +62,7 @@ Hậu quả định lượng (ước lượng nội bộ từ mùa gần nhất,
 - Mobile app (React Native) cho nhân sự check-in, hỗ trợ offline.
 - Backend API (NestJS / TypeScript), PostgreSQL, Redis, RabbitMQ.
 - **Mock payment gateway** (service riêng, có thể giả lập lỗi/timeout) để demo Circuit Breaker và Idempotency Key.
-- **Mock AI provider** (có thể chuyển sang OpenAI/Gemini bằng env var) để demo pipeline.
+- **Gemini AI provider** qua `GEMINI_API_KEY` để demo pipeline AI thật; `services/mock-ai` chỉ còn là legacy/dev fallback, không nằm trong luồng chính.
 - Notification qua **email (SMTP)** + **in-app**, kiến trúc cho phép cắm thêm Telegram/Zalo bằng adapter.
 - CSV importer (cron job) đọc từ thư mục `data/csv-drop/`.
 - Rate Limiting (Token Bucket trên Redis) + Circuit Breaker + Idempotency Key — **cài đặt thật, không stub**.

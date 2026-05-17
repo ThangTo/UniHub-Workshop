@@ -6,7 +6,7 @@
 
 ### 1.1 Architectural Style được chọn
 
-Hệ thống được thiết kế theo **Modular Monolith** ở backend, kết hợp với **một số worker bất đồng bộ tách riêng** cho các tác vụ nặng (AI Summary, CSV Import, Notification dispatch). Frontend tách thành 3 ứng dụng độc lập (Student Web, Admin Web, Check-in Mobile).
+Hệ thống được thiết kế theo **Modular Monolith** ở backend, kết hợp với **các worker/job bất đồng bộ trong backend** cho các tác vụ nặng (AI Summary, CSV Import, Notification dispatch). Frontend tách thành 3 ứng dụng độc lập (Student Web, Admin Web, Check-in Mobile).
 
 **Lý do chọn Modular Monolith** (so với Microservices):
 
@@ -15,34 +15,34 @@ Hệ thống được thiết kế theo **Modular Monolith** ở backend, kết 
 - Có thể đạt tất cả mục tiêu hiệu năng (12K SV / 10 phút) nhờ Redis + connection pooling, không cần phân tách dịch vụ vật lý.
 - Thiết kế **modular** (mỗi domain là 1 NestJS module riêng, không gọi chéo qua repository) → dễ bóc tách thành microservices ở học kỳ sau nếu cần.
 
-**Lý do tách worker async ra process riêng**:
+**Lý do tách worker async khỏi luồng HTTP**:
 
 - AI Summary có thể mất 5–30 giây / file → không thể chiếm worker HTTP.
-- CSV Import chạy lúc 02:00 đêm, 10K dòng → cần process scheduler riêng.
+- CSV Import chạy lúc 02:00 đêm, 10K dòng → cần scheduler/job riêng trong backend.
 - Notification dispatch cần retry, không nên block luồng request đăng ký.
 
 ### 1.2 Các thành phần chính
 
 | Thành phần                | Vai trò                                                                              | Công nghệ                                  |
 | ------------------------- | ------------------------------------------------------------------------------------ | ------------------------------------------ |
-| **Student Web**           | UI cho sinh viên xem & đăng ký workshop, xem QR                                      | React 18 + Vite + TailwindCSS + shadcn/ui  |
-| **Admin Web**             | UI cho ban tổ chức quản lý workshop, upload PDF, xem thống kê                        | React 18 + Vite + shadcn/ui + Recharts     |
+| **Student Web**           | UI cho sinh viên xem & đăng ký workshop, xem QR                                      | React 19 + Vite + TailwindCSS              |
+| **Admin Web**             | UI cho ban tổ chức quản lý workshop, upload PDF, xem thống kê                        | React 19 + Vite + TailwindCSS              |
 | **Check-in Mobile**       | App quét QR, hỗ trợ offline                                                          | React Native (Expo) + SQLite (expo-sqlite) |
 | **API Gateway / Backend** | REST API, auth, rate limit, circuit breaker, business logic                          | NestJS (Node.js / TypeScript)              |
-| **Async Workers**         | AI Summary worker, CSV importer (cron), notification dispatcher, outbox relay        | NestJS standalone app + RabbitMQ consumers |
-| **Mock Payment Gateway**  | Service mô phỏng cổng thanh toán có thể bật/tắt lỗi                                  | NestJS standalone (port riêng)             |
+| **Async Workers**         | AI Summary, CSV importer (cron), notification dispatcher, outbox relay trong backend | NestJS providers + RabbitMQ consumers      |
+| **Mock Payment Gateway**  | Service mô phỏng cổng thanh toán có thể bật/tắt lỗi                                  | Express service `services/mock-pg`         |
 | **PostgreSQL**            | DB chính (transactional data)                                                        | PostgreSQL 16                              |
 | **Redis**                 | Cache, rate limit counter, seat counter atomic, idempotency store, session blacklist | Redis 7                                    |
 | **RabbitMQ**              | Message broker cho event (registration confirmed, payment completed, ...)            | RabbitMQ 3                                 |
 | **MinIO**                 | Object storage cho file PDF upload                                                   | MinIO (tương thích S3)                     |
-| **Mock AI Provider**      | Service mô phỏng OpenAI/Gemini                                                       | NestJS standalone                          |
+| **Gemini AI API**         | Provider AI sinh summary thật qua `GEMINI_API_KEY`                                   | Google Gemini API                          |
 
 ### 1.3 Cách các thành phần giao tiếp
 
 - **Client ↔ Backend**: HTTPS REST + JWT bearer token. Sự kiện real-time (số chỗ còn lại) qua **Server-Sent Events (SSE)** thay vì WebSocket để đơn giản và đủ dùng.
-- **Backend ↔ DB**: TCP connection pool (TypeORM, pool size 30/instance).
+- **Backend ↔ DB**: TCP connection pool qua Prisma Client (PostgreSQL pool do datasource quản lý).
 - **Backend ↔ Redis**: TCP, ioredis client, pipeline cho atomic ops.
-- **Backend ↔ Workers**: RabbitMQ (durable queue, ack manual). Event payload định nghĩa trong `contracts/events.ts`.
+- **Backend ↔ Workers/Jobs**: Transactional Outbox + RabbitMQ cho event async; consumers/jobs chạy trong backend app ở cấu hình hiện tại.
 - **Backend ↔ Payment Gateway**: HTTPS, bọc qua **Circuit Breaker** + **timeout 3s** + **retry exponential backoff (max 2)**.
 - **Mobile Check-in ↔ Backend**: REST. Khi offline, app ghi vào SQLite local; khi có mạng, gọi `POST /checkin/batch` (idempotent).
 
@@ -54,7 +54,7 @@ Hệ thống được thiết kế theo **Modular Monolith** ở backend, kết 
 | **Redis**                | Mất rate limit + atomic seat counter + idempotency | Fallback: rate limit chuyển sang in-memory; seat allocation về full DB lock; idempotency key đi DB |
 | **RabbitMQ**             | Event không phát đi                                | Notification & AI Summary delay; backend ghi outbox table → retry khi MQ phục hồi                  |
 | **Mock Payment Gateway** | Không thanh toán được                              | **Circuit Breaker mở**, **Graceful Degradation**: catalog/đăng ký free/check-in/AI/CSV vẫn chạy    |
-| **Mock AI Provider**     | Summary không tạo được                             | Worker retry với backoff; trang chi tiết hiển thị "Đang tạo tóm tắt"                               |
+| **Gemini AI API**        | Summary không tạo được do thiếu key/quota/network  | Worker retry với backoff; trang chi tiết vẫn hiển thị description gốc nếu summary `FAILED`          |
 | **Mobile mất mạng**      | Không gọi được API                                 | Lưu local SQLite, sync khi có mạng                                                                 |
 
 ---
@@ -93,12 +93,12 @@ Hệ thống được thiết kế theo **Modular Monolith** ở backend, kết 
 - Mọi request đi qua `PaymentClient` được bọc bởi **Circuit Breaker** (`opossum`).
 - Trạng thái Circuit lưu in-memory per-instance; metrics push lên Prometheus mỗi 10s.
 - Khi Circuit `Open` → backend trả `503` ngay không gọi gateway, kèm message thân thiện. Catalog/đăng ký free/check-in/AI/CSV vẫn chạy bình thường (Graceful Degradation).
-- Webhook callback từ gateway đi vào endpoint `POST /payments/callback` (HMAC verify) → idempotent xử lý.
+- Webhook từ gateway đi vào endpoint `POST /payments/webhook` (HMAC verify bằng `X-Mock-Pg-Signature`) → idempotent xử lý.
 
 **Tích hợp AI Provider**
 
-- Async hoàn toàn: admin upload PDF → backend lưu MinIO + tạo record `Workshop.summary_status = pending` → publish event `pdf.uploaded`.
-- Worker AI: tải PDF → `pdf-parse` → clean → gọi AI API (timeout 30s, retry 3 lần) → ghi summary vào DB.
+- Async hoàn toàn: admin upload PDF → backend lưu MinIO + tạo record `Workshop.summary_status = pending` → publish event `workshop.pdf.uploaded`.
+- Worker AI: tải PDF → `pdfjs-dist`/`extractPdfText` → clean → gọi Gemini API (timeout 30s, retry 3 lần cho lỗi tạm thời) → ghi summary vào DB.
 - Cache theo SHA-256 hash file (cùng file → cùng summary, không gọi lại AI).
 
 ### 3.2 Luồng Check-in Offline (chi tiết)
@@ -130,7 +130,7 @@ sequenceDiagram
 
     Note over App,API: KHI CÓ MẠNG TRỞ LẠI
     App->>SQLite: SELECT * WHERE synced=false
-    App->>API: POST /checkin/batch<br/>{items: [...], deviceId}
+    App->>API: POST /checkin/batch<br/>{items: [{qrToken, scannedAt, deviceId, idempotencyKey}]}
     API->>DB: BEGIN TRANSACTION
     loop từng item
         API->>DB: INSERT INTO checkins ON CONFLICT (idempKey) DO NOTHING
@@ -158,12 +158,12 @@ Hệ thống dùng **kết hợp PostgreSQL (primary) + Redis (cache/atomic stor
 | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- | ------------------------------------------- | --------------------------------------------------------------------------------- |
 | Users, Workshops, Registrations, Payments, Check-ins | Quan hệ chặt, transaction ACID, query phức tạp (JOIN, aggregate cho thống kê), constraint nghiêm ngặt (unique seat) | **PostgreSQL**                              | Tính nhất quán cao, transaction đa bảng, partial index, JSONB cho field linh hoạt |
 | Seat counter (số chỗ còn lại real-time)              | Giảm/cộng atomic, tốc độ rất cao, không cần persistent dài                                                          | **Redis** (`DECR`/`INCR`)                   | Atomic ops single-threaded, tránh race; rebuild được từ PostgreSQL                |
-| Rate limit counter                                   | Đếm theo cửa sổ thời gian, TTL ngắn (1–60 giây)                                                                     | **Redis**                                   | TTL native, sliding window dễ làm bằng `ZADD`/`ZREMRANGEBYSCORE`                  |
+| Rate limit counter                                   | Đếm token bucket/sliding window, TTL ngắn                                                                           | **Redis**                                   | Lua atomic + TTL native                                                           |
 | Idempotency Key                                      | Lookup theo key, TTL 24h, cần durable fallback cho payment/registration/check-in                                    | **Redis + PostgreSQL**                      | Redis nhanh; bảng `idempotency_keys` chống trùng dài hạn và dùng khi Redis down   |
 | Session blacklist (JWT revoke)                       | Lookup boolean, TTL = JWT exp                                                                                       | **Redis**                                   | Như trên                                                                          |
 | Workshop catalog cache                               | Đọc nhiều, ghi ít, cần invalidate khi admin sửa                                                                     | **Redis** (read-through, TTL 5 phút)        | Giảm tải DB khi 12K SV cùng load catalog                                          |
-| File PDF, QR images                                  | Blob, lớn, ít cập nhật                                                                                              | **MinIO (S3 API)**                          | DB không nên lưu blob; CDN-ready                                                  |
-| Audit log, AI summary cache                          | Append-only, đọc theo thời gian                                                                                     | **PostgreSQL** (table partition theo tháng) | Phân tích sau này; partition tránh bảng quá lớn                                   |
+| File PDF                                             | Blob, lớn, ít cập nhật                                                                                              | **MinIO (S3 API)**                          | DB không nên lưu blob; CDN-ready; QR image hiện trả dạng `qrImageDataUrl`         |
+| Audit log, AI summary cache                          | Append-only, đọc theo thời gian                                                                                     | **PostgreSQL**                              | Schema hiện tại dùng bảng thường; có thể partition sau nếu dữ liệu lớn            |
 
 ### 4.2 Schema PostgreSQL — Các entity quan trọng
 
@@ -546,7 +546,7 @@ sequenceDiagram
 
     FE->>SV: Hiển thị form thanh toán
     SV->>FE: Xác nhận thanh toán
-    FE->>API: POST /payments<br/>Header: Idempotency-Key=uuid<br/>{regId, amount, method}
+    FE->>API: POST /payments<br/>Header: Idempotency-Key=uuid<br/>{registrationId, method}
     API->>R: GET idem:payments:{key}
     alt key tồn tại
         API-->>FE: trả response_snapshot cũ (KHÔNG gọi PG lần 2)
@@ -569,14 +569,14 @@ sequenceDiagram
             API->>DB: UPDATE registration CONFIRMED, qr_token=...
             API->>DB: INSERT outbox_event registration.confirmed
             API->>DB: COMMIT
-            API->>R: SET idem:payments:{key}=snapshot(200,{qrToken})
+            API->>R: SET idem:payments:{key}=snapshot(201,{qrToken})
             API->>R: DEL hold:W:SV
-            API-->>FE: 200 {qrToken, qrImageUrl}
+            API-->>FE: 201 {status:"success", paymentId, qrToken, qrImageDataUrl}
         else PG timeout / 5xx
             CB->>CB: ghi nhận failure
             API->>DB: UPDATE payment TIMEOUT
             API->>R: SET idem:payments:{key}=snapshot(202,pending_reconcile)
-            API-->>FE: 202 payment_pending_reconcile
+            API-->>FE: 202 {status:"pending", paymentId}
         end
     end
 
@@ -597,7 +597,7 @@ sequenceDiagram
 | Lỗi                                                      | Phản ứng                                                                                                                         |
 | -------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
 | Mạng client rớt sau khi gọi `/payments`                  | Server đã ghi nhận; client retry cùng `Idempotency-Key` → trả snapshot                                                           |
-| PG trả timeout                                           | Status `TIMEOUT`; webhook về sau (callback) chốt `SUCCESS`/`FAILED`                                                              |
+| PG trả timeout                                           | Status `TIMEOUT`; webhook về sau chốt `SUCCESS`/`FAILED`                                                                         |
 | Webhook về sau khi đã tự cancel                          | Reconcile job chạy mỗi 5 phút đồng bộ trạng thái                                                                                 |
 | Backend chết sau khi giữ ghế Redis nhưng trước DB commit | Hold Redis có `requestId` và TTL; sweeper/reconcile phát hiện hold không có registration tương ứng → release ghế trong ≤ 60 giây |
 | Idempotency key dùng cho payload khác                    | So `request_hash` → trả 422 `idempotency_key_reused`                                                                             |
@@ -644,7 +644,7 @@ sequenceDiagram
                 end
                 W->>DB: BEGIN
                 W->>DB: UPSERT students FROM staging
-                W->>DB: TRUNCATE staging
+                W->>DB: DELETE staging rows theo import_job_id
                 W->>DB: COMMIT
                 W->>DB: UPDATE SUCCESS/PARTIAL
                 W->>FS: archive file
@@ -767,8 +767,8 @@ export class WorkshopController {
 | ---------------------------------------------- | ------------ | ----------------- | -------------------------------- |
 | Per-IP (toàn site)                             | 60 tokens    | 30 token/phút     | 429 + `Retry-After`              |
 | Per-user authenticated (toàn site)             | 120 tokens   | 60 token/phút     | 429                              |
-| Per-user trên `POST /registrations`            | 5 tokens     | 1 token / 10 giây | 429 — chống auto-click           |
-| Per-user trên `POST /payments`                 | 10 tokens    | 5 token/phút      | 429                              |
+| Per-user trên `POST /registrations`            | 10 tokens    | 1 token/giây      | 429 — chống auto-click           |
+| Per-user trên `POST /payments`                 | 5 tokens     | 30 token/phút     | 429                              |
 | Global cho `POST /registrations` (system-wide) | 500 req/giây | (Sliding Window)  | `202 Accepted` + queue FIFO ngắn |
 
 **Cài đặt** (Redis Lua script atomic):
@@ -916,7 +916,7 @@ flowchart TD
 **Áp dụng cho các endpoint khác**:
 
 - `POST /registrations`: ngăn user bấm 2 lần đăng ký cùng workshop.
-- `POST /checkin/batch`: mỗi item trong batch có `idempotency_key` riêng → batch retry an toàn.
+- `POST /checkin/batch`: mỗi item trong batch có `idempotencyKey` riêng → batch retry an toàn.
 
 ---
 
@@ -924,7 +924,7 @@ flowchart TD
 
 ### ADR-001: Modular Monolith thay vì Microservices
 
-- **Quyết định**: Backend là 1 NestJS app duy nhất, chia module theo bounded context. Worker async chạy ở process riêng cùng codebase.
+- **Quyết định**: Backend là 1 NestJS app duy nhất, chia module theo bounded context. Worker/job async chạy cùng backend app trong cấu hình hiện tại và có thể tách process sau nếu cần scale.
 - **Lý do**: Team 3 người, thời gian giới hạn; microservices gây overhead chưa cần thiết. Modular hóa cho phép tách dịch vụ sau.
 - **Đánh đổi**: Một deploy unit → mọi thay đổi build/deploy lại toàn bộ. Chấp nhận được ở quy mô đồ án.
 
@@ -966,7 +966,7 @@ flowchart TD
 
 ### ADR-008: Mock Payment Gateway như service riêng
 
-- **Quyết định**: Viết 1 NestJS app riêng `mock-payment-gateway` mô phỏng VNPay (`/charge`, `/callback`), có flag `FAILURE_RATE`, `LATENCY_MS`, `DOWN=true`.
+- **Quyết định**: Viết 1 Express service riêng `services/mock-pg` mô phỏng gateway (`/charge`, `/charge/:id`, `/refund`), callback về backend qua `POST /payments/webhook`, có flag `MOCK_PG_FAILURE_RATE`, `MOCK_PG_LATENCY_MS`, `MOCK_PG_DOWN`.
 - **Lý do**: Demo Circuit Breaker và Idempotency Key cần điều khiển được lỗi.
 - **Đánh đổi**: Không phải gateway thật, nhưng giữ contract giống thật để dễ chuyển đổi sau.
 
@@ -994,42 +994,27 @@ flowchart TD
 
 ```
 src/
-├── backend/
-│   ├── src/
-│   │   ├── modules/
-│   │   │   ├── auth/
-│   │   │   ├── workshops/
-│   │   │   ├── registrations/
-│   │   │   ├── payments/
-│   │   │   ├── checkin/
-│   │   │   ├── notifications/
-│   │   │   ├── ai-summary/
-│   │   │   └── csv-sync/
-│   │   ├── common/
-│   │   │   ├── guards/        (JwtAuthGuard, RolesGuard, OwnershipGuard)
-│   │   │   ├── interceptors/  (IdempotencyInterceptor)
-│   │   │   ├── rate-limit/    (TokenBucketService)
-│   │   │   ├── circuit-breaker/
-│   │   │   └── outbox/
-│   │   └── main.ts
-│   └── test/
-├── workers/
-│   ├── ai-summary-worker/
-│   ├── csv-importer/
-│   ├── notification-dispatcher/
-│   └── outbox-relay/
-├── mock-payment-gateway/
-├── mock-ai-provider/
-├── web-student/        (React + Vite)
-├── web-admin/          (React + Vite)
-├── mobile-checkin/     (React Native + Expo)
-├── shared/
-│   └── contracts/      (DTO + event types dùng chung)
-└── docker-compose.yml
+├── apps/
+│   ├── backend/         (NestJS API + domain modules + workers/jobs)
+│   │   ├── prisma/      (schema, migrations, seed)
+│   │   └── src/
+│   │       ├── common/  (auth guards, config, idempotency, outbox, Redis)
+│   │       └── modules/ (auth, catalog, registration, payment, checkin,
+│   │                    notification, ai-summary, csv-sync, metrics)
+│   ├── student-web/     (React 19 + Vite + TailwindCSS)
+│   ├── admin-web/       (React 19 + Vite + TailwindCSS)
+│   └── mobile/          (Expo + React Native + SQLite offline queue)
+├── services/
+│   ├── mock-pg/         (Express mock payment gateway)
+│   └── mock-ai/         (legacy/dev-only mock AI service)
+├── scripts/             (smoke tests, demo scripts, k6 scripts)
+├── docs/                (runbooks and video/demo scripts)
+├── docker-compose.yml
+└── .env                 (Compose-level env, including GEMINI_API_KEY)
 
 data/
-├── csv-drop/           (input cho CSV importer)
-├── csv-archive/        (file đã import thành công)
-├── csv-quarantine/     (file lỗi)
-└── seed/               (seed data)
+├── csv-drop/            (input cho CSV importer)
+├── csv-archive/         (file đã import thành công)
+├── csv-quarantine/      (file lỗi)
+└── seed/                (seed data)
 ```
