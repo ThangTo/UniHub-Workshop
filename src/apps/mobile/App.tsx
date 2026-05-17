@@ -9,17 +9,20 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  FlatList,
   InputAccessoryView,
   Keyboard,
   Platform,
   Pressable,
   SafeAreaView,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
+  useWindowDimensions,
   View,
 } from 'react-native';
+
+type AppPage = 'workshops' | 'info' | 'checkin' | 'students' | 'queue' | 'staff';
 
 type CheckinResultCode =
   | 'accepted'
@@ -48,7 +51,19 @@ type PendingScan = {
 type AuthState = {
   accessToken: string;
   refreshToken: string;
+  userId?: string;
   fullName?: string;
+  email?: string;
+  roles?: string[];
+};
+
+type StaffProfile = {
+  id: string;
+  email: string;
+  fullName: string;
+  phone?: string | null;
+  roles: string[];
+  createdAt?: string;
 };
 
 type JwksState = {
@@ -83,6 +98,41 @@ type BatchResponse = {
   invalid?: BatchItemResult[];
 };
 
+type AssignedWorkshop = {
+  id: string;
+  title: string;
+  description?: string | null;
+  startAt: string;
+  endAt: string;
+  status: string;
+  roomName?: string | null;
+  roomCode?: string | null;
+  speakerName?: string | null;
+  assignmentStartsAt?: string | null;
+  assignmentEndsAt?: string | null;
+};
+
+type StaffWorkshopsResponse = {
+  items: AssignedWorkshop[];
+};
+
+type StudentCheckinRow = {
+  registrationId: string;
+  studentId: string;
+  studentName: string;
+  studentCode?: string | null;
+  email?: string | null;
+  registrationStatus: string;
+  qrStatus: 'CONFIRMED' | 'NOT_CONFIRMED';
+  checkedInAt?: string | null;
+  checkedBy?: string | null;
+  deviceId?: string | null;
+};
+
+type WorkshopStudentsResponse = {
+  items: StudentCheckinRow[];
+};
+
 type QrValidationErrorCode =
   | 'missing_key'
   | 'malformed'
@@ -115,10 +165,13 @@ const QR_TOKEN_INPUT_ACCESSORY_ID = 'qr-token-input-accessory';
 const db = SQLite.openDatabaseSync('unihub-checkin.db');
 
 export default function App() {
+  const { width } = useWindowDimensions();
+  const isCompact = width < 760;
   const [apiBaseUrl, setApiBaseUrl] = useState(DEFAULT_API_BASE_URL);
   const [email, setEmail] = useState('staff@unihub.local');
   const [password, setPassword] = useState('Test@12345');
   const [auth, setAuth] = useState<AuthState | null>(null);
+  const [staffProfile, setStaffProfile] = useState<StaffProfile | null>(null);
   const [jwks, setJwks] = useState<JwksState | null>(null);
   const [qrToken, setQrToken] = useState('');
   const [pending, setPending] = useState<PendingScan[]>([]);
@@ -128,11 +181,23 @@ export default function App() {
   const [isOnline, setIsOnline] = useState<boolean | null>(null);
   const [lastSyncMessage, setLastSyncMessage] = useState('No sync yet');
   const [lastQrError, setLastQrError] = useState<string | null>(null);
+  const [activePage, setActivePage] = useState<AppPage>('workshops');
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const isMenuConstrained = isCompact && sidebarOpen;
+  const forceSingleColumn = isCompact || isMenuConstrained;
+  const [staffWorkshops, setStaffWorkshops] = useState<AssignedWorkshop[]>([]);
+  const [selectedWorkshopId, setSelectedWorkshopId] = useState<string | null>(null);
+  const [studentRows, setStudentRows] = useState<StudentCheckinRow[]>([]);
+  const [studentRowsWorkshopId, setStudentRowsWorkshopId] = useState<string | null>(null);
+  const [staffDataLoading, setStaffDataLoading] = useState(false);
+  const [profileLoading, setProfileLoading] = useState(false);
   const [permission, requestPermission] = useCameraPermissions();
   const syncingRef = useRef(false);
   const scanInFlightRef = useRef(false);
   const lastCameraTokenRef = useRef<{ token: string; at: number } | null>(null);
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const selectedWorkshopIdRef = useRef<string | null>(null);
+  const studentsLoadSeqRef = useRef(0);
 
   const pendingCount = useMemo(
     () => pending.filter((item) => item.synced === 0).length,
@@ -142,11 +207,27 @@ export default function App() {
     () => pending.filter((item) => item.synced === 1).length,
     [pending],
   );
+  const selectedWorkshop = useMemo(
+    () => staffWorkshops.find((workshop) => workshop.id === selectedWorkshopId) ?? null,
+    [staffWorkshops, selectedWorkshopId],
+  );
+  const visibleStudentRows = useMemo(
+    () => (studentRowsWorkshopId === selectedWorkshopId ? studentRows : []),
+    [studentRows, studentRowsWorkshopId, selectedWorkshopId],
+  );
+  const confirmedStudents = useMemo(
+    () => visibleStudentRows.filter((student) => student.qrStatus === 'CONFIRMED').length,
+    [visibleStudentRows],
+  );
 
   useEffect(() => {
     void bootstrap();
     return () => clearSyncRetry();
   }, []);
+
+  useEffect(() => {
+    setSidebarOpen(true);
+  }, [isCompact]);
 
   useEffect(() => {
     const unsubscribe = NetInfo.addEventListener((state) => {
@@ -158,6 +239,27 @@ export default function App() {
     });
     return unsubscribe;
   }, [auth, apiBaseUrl]);
+
+  useEffect(() => {
+    if (auth && isOnline !== false) {
+      void loadStaffProfile(true);
+      void loadStaffWorkshops(true);
+    }
+  }, [auth?.accessToken, apiBaseUrl, isOnline]);
+
+  useEffect(() => {
+    selectedWorkshopIdRef.current = selectedWorkshopId;
+    studentsLoadSeqRef.current += 1;
+    setStudentRows([]);
+    setStudentRowsWorkshopId(selectedWorkshopId);
+  }, [selectedWorkshopId]);
+
+  useEffect(() => {
+    selectedWorkshopIdRef.current = selectedWorkshopId;
+    if (auth && selectedWorkshopId && isOnline !== false) {
+      void loadWorkshopStudents(selectedWorkshopId, true);
+    }
+  }, [auth?.accessToken, apiBaseUrl, selectedWorkshopId, isOnline]);
 
   async function bootstrap() {
     db.execSync('PRAGMA journal_mode = WAL;');
@@ -243,7 +345,10 @@ export default function App() {
       const nextAuth: AuthState = {
         accessToken: body.accessToken,
         refreshToken: body.refreshToken,
+        userId: body.userId,
         fullName: body.fullName,
+        email,
+        roles,
       };
       await SecureStore.setItemAsync(AUTH_STORAGE_KEY, JSON.stringify(nextAuth));
       setAuth(nextAuth);
@@ -285,6 +390,77 @@ export default function App() {
     }
   }
 
+  async function loadStaffProfile(silent = false, authOverride = auth) {
+    if (!authOverride) return;
+    setProfileLoading(true);
+    try {
+      const res = await fetch(`${apiBaseUrl.replace(/\/$/, '')}/auth/me`, {
+        headers: { Authorization: `Bearer ${authOverride.accessToken}` },
+      });
+      const body = (await res.json()) as StaffProfile & { code?: string; message?: string };
+      if (!res.ok) throw new Error(body?.message ?? body?.code ?? 'load_staff_profile_failed');
+      setStaffProfile(body);
+    } catch (error) {
+      if (!silent) Alert.alert('Load staff failed', (error as Error).message);
+    } finally {
+      setProfileLoading(false);
+    }
+  }
+
+  async function loadStaffWorkshops(silent = false) {
+    if (!auth) return;
+    setStaffDataLoading(true);
+    try {
+      const res = await fetch(`${apiBaseUrl.replace(/\/$/, '')}/checkin/my-workshops`, {
+        headers: { Authorization: `Bearer ${auth.accessToken}` },
+      });
+      const body = (await res.json()) as StaffWorkshopsResponse & { code?: string; message?: string };
+      if (!res.ok) throw new Error(body?.message ?? body?.code ?? 'load_workshops_failed');
+      setStaffWorkshops(body.items ?? []);
+      setSelectedWorkshopId((current) => {
+        if (current && body.items?.some((workshop) => workshop.id === current)) return current;
+        return body.items?.[0]?.id ?? null;
+      });
+    } catch (error) {
+      if (!silent) Alert.alert('Load workshops failed', (error as Error).message);
+    } finally {
+      setStaffDataLoading(false);
+    }
+  }
+
+  async function loadWorkshopStudents(workshopId = selectedWorkshopId, silent = false) {
+    if (!auth || !workshopId) {
+      setStudentRows([]);
+      setStudentRowsWorkshopId(null);
+      return;
+    }
+    const targetWorkshopId = workshopId;
+    const loadSeq = ++studentsLoadSeqRef.current;
+    setStaffDataLoading(true);
+    try {
+      const res = await fetch(
+        `${apiBaseUrl.replace(/\/$/, '')}/checkin/workshops/${targetWorkshopId}/students`,
+        { headers: { Authorization: `Bearer ${auth.accessToken}` } },
+      );
+      const body = (await res.json()) as WorkshopStudentsResponse & { code?: string; message?: string };
+      if (!res.ok) throw new Error(body?.message ?? body?.code ?? 'load_students_failed');
+      if (loadSeq === studentsLoadSeqRef.current && selectedWorkshopIdRef.current === targetWorkshopId) {
+        setStudentRows(body.items ?? []);
+        setStudentRowsWorkshopId(targetWorkshopId);
+      }
+    } catch (error) {
+      if (loadSeq === studentsLoadSeqRef.current && selectedWorkshopIdRef.current === targetWorkshopId) {
+        setStudentRows([]);
+        setStudentRowsWorkshopId(targetWorkshopId);
+      }
+      if (!silent) Alert.alert('Load students failed', (error as Error).message);
+    } finally {
+      if (loadSeq === studentsLoadSeqRef.current) {
+        setStaffDataLoading(false);
+      }
+    }
+  }
+
   function clearSyncRetry() {
     if (retryTimerRef.current) {
       clearTimeout(retryTimerRef.current);
@@ -311,10 +487,16 @@ export default function App() {
     }
     await SecureStore.deleteItemAsync(AUTH_STORAGE_KEY);
     setAuth(null);
+    setActivePage('workshops');
+    setStaffProfile(null);
+    setStaffWorkshops([]);
+    setSelectedWorkshopId(null);
+    setStudentRows([]);
+    setStudentRowsWorkshopId(null);
   }
 
   async function queueScan(tokenInput = qrToken, source: 'manual' | 'camera' = 'manual') {
-    const token = tokenInput.trim();
+    const token = extractJwtToken(tokenInput);
     if (!token) return;
 
     if (source === 'camera') {
@@ -399,6 +581,7 @@ export default function App() {
   }
 
   function verifyQrOffline(token: string, keySet = jwks): QrPayload {
+    const normalizedToken = extractJwtToken(token);
     if (!keySet) {
       throw new QrValidationError(
         'missing_key',
@@ -408,7 +591,7 @@ export default function App() {
 
     let parsed: { headerObj?: { alg?: string }; payloadObj?: QrPayload };
     try {
-      parsed = KJUR.jws.JWS.parse(token) as { headerObj?: { alg?: string }; payloadObj?: QrPayload };
+      parsed = KJUR.jws.JWS.parse(normalizedToken) as { headerObj?: { alg?: string }; payloadObj?: QrPayload };
     } catch {
       throw new QrValidationError('malformed', 'This QR is not a UniHub check-in token.');
     }
@@ -424,23 +607,26 @@ export default function App() {
       throw new QrValidationError('missing_fields', 'QR token is missing registration or validity fields.');
     }
 
-    const ok = KJUR.jws.JWS.verifyJWT(token, keySet.publicKey, {
-      alg: ['RS256'],
-      iss: [keySet.issuer],
-      verifyAt: Math.floor(Date.now() / 1000),
-    });
+    if (payload.iss && payload.iss !== keySet.issuer) {
+      throw new QrValidationError(
+        'invalid_signature_or_expired',
+        `QR issuer "${payload.iss}" does not match cached issuer "${keySet.issuer}".`,
+      );
+    }
+
+    const ok = KJUR.jws.JWS.verify(normalizedToken, keySet.publicKey, ['RS256']);
     if (!ok) {
       throw new QrValidationError(
         'invalid_signature_or_expired',
-        'QR signature does not match the cached public key, or the JWT has expired. The app tried to refresh the key if online.',
+        'QR signature does not match the cached public key. Refresh the key, then make sure this QR was generated by the same backend instance.',
       );
     }
 
     const now = Date.now();
-    if (now < payload.validFrom * 1000) {
+    if (payload.exp && now > payload.exp * 1000 + POST_END_GRACE_MS) {
       throw new QrValidationError(
-        'not_yet_valid',
-        `QR is not valid yet. It opens at ${formatQrTime(payload.validFrom)}.`,
+        'expired',
+        `QR JWT is expired. It expired at ${formatQrTime(payload.exp)}.`,
       );
     }
     if (now > payload.validTo * 1000 + POST_END_GRACE_MS) {
@@ -554,6 +740,9 @@ export default function App() {
       }
 
       await reloadPending();
+      if (selectedWorkshopId && (accepted.length > 0 || duplicates.length > 0)) {
+        void loadWorkshopStudents(selectedWorkshopId, true);
+      }
       const message = `Sync: ${accepted.length} accepted, ${duplicates.length} duplicate, ${invalid.length} invalid`;
       setLastSyncMessage(message);
       const assignmentWarnings = invalid.filter((item) => (
@@ -605,8 +794,12 @@ export default function App() {
     );
   }
 
+  function selectPage(page: AppPage) {
+    setActivePage(page);
+  }
+
   return (
-    <SafeAreaView style={styles.page}>
+    <SafeAreaView style={[styles.page, isCompact ? styles.pageCompact : null]}>
       {!auth ? (
         <View style={styles.loginContainer}>
           <View style={styles.loginHeader}>
@@ -659,98 +852,271 @@ export default function App() {
           </View>
         </View>
       ) : (
-        <>
-          <View style={styles.header}>
-            <View>
-              <Text style={styles.title}>UniHub Check-in</Text>
-              <Text style={styles.subtitle}>{auth.fullName ?? 'Check-in staff'}</Text>
+        <View style={[styles.appShell, isCompact ? styles.appShellCompact : null]}>
+          {sidebarOpen ? (
+            <View style={[styles.sidebar, isCompact ? styles.sidebarCompact : null]}>
+              <View style={styles.navGroup}>
+                <Text style={styles.sidebarTitle}>Workshop</Text>
+                <NavButton label="List workshop" active={activePage === 'workshops'} onPress={() => selectPage('workshops')} compact={isCompact} nested />
+                <NavButton label="Thông tin" active={activePage === 'info'} onPress={() => selectPage('info')} compact={isCompact} nested />
+                <NavButton label="Check-in" active={activePage === 'checkin'} onPress={() => selectPage('checkin')} compact={isCompact} nested />
+                <NavButton label="Danh sách sinh viên" active={activePage === 'students'} onPress={() => selectPage('students')} compact={isCompact} nested />
+                <NavButton label={`Queue ${pendingCount}`} active={activePage === 'queue'} onPress={() => selectPage('queue')} compact={isCompact} nested />
+              </View>
+              <View style={styles.navGroup}>
+                <NavButton label="Thông tin nhân viên" active={activePage === 'staff'} onPress={() => selectPage('staff')} compact={isCompact} />
+              </View>
+              <Pressable onPress={logout} style={styles.sidebarLogout}>
+                <Text style={styles.sidebarLogoutText}>Logout</Text>
+              </Pressable>
             </View>
-            <View style={[styles.statusPill, isOnline ? styles.online : styles.offline]}>
-              <Text style={styles.statusText}>{isOnline ? 'Online' : isOnline === false ? 'Offline' : 'Network'}</Text>
-            </View>
-          </View>
+          ) : null}
 
-          <View style={styles.panel}>
-            <View style={styles.metaPanel}>
-              <Text style={styles.metaText}>Device: {deviceId}</Text>
-              <Text style={styles.metaText}>
-                Public key: {jwks ? `${jwks.issuer}, ${new Date(jwks.fetchedAt).toLocaleString()}` : 'not cached'}
-              </Text>
-              <Text style={styles.metaText}>Last sync: {lastSyncMessage}</Text>
-            </View>
-
-            {scannerOpen ? (
-              <View style={styles.cameraFrame}>
-                <CameraView
-                  style={styles.camera}
-                  barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
-                  onBarcodeScanned={({ data }) => {
-                    if (!busy && data) void queueScan(data, 'camera');
-                  }}
-                />
-                <Pressable onPress={() => setScannerOpen(false)} style={styles.secondaryButton}>
-                  <Text style={styles.secondaryButtonText}>Close camera</Text>
+          <View style={[styles.content, isMenuConstrained ? styles.contentConstrained : null]}>
+            <View style={[styles.contentHeader, isCompact ? styles.contentHeaderCompact : null, isMenuConstrained ? styles.contentHeaderConstrained : null]}>
+              <View style={[styles.headerTitleGroup, isMenuConstrained ? styles.headerTitleGroupConstrained : null]}>
+                <Pressable onPress={() => setSidebarOpen((current) => !current)} style={styles.menuButton}>
+                  <Text style={styles.menuButtonText}>{sidebarOpen ? (isMenuConstrained ? 'Ẩn' : 'Ẩn menu') : 'Menu'}</Text>
                 </Pressable>
+                <Text style={[styles.title, isCompact ? styles.titleCompact : null, isMenuConstrained ? styles.titleConstrained : null]}>UniHub Check-in</Text>
+                <Text style={[styles.subtitle, isMenuConstrained ? styles.subtitleConstrained : null]}>{auth.fullName ?? 'Check-in staff'}</Text>
               </View>
-            ) : null}
-            <TextInput
-              value={qrToken}
-              onChangeText={setQrToken}
-              style={[styles.input, styles.qrInput]}
-              autoCapitalize="none"
-              autoCorrect={false}
-              blurOnSubmit
-              inputAccessoryViewID={Platform.OS === 'ios' ? QR_TOKEN_INPUT_ACCESSORY_ID : undefined}
-              multiline
-              onSubmitEditing={() => Keyboard.dismiss()}
-              placeholder="Paste QR token"
-              placeholderTextColor="#94a3b8"
-              returnKeyType="done"
-            />
-            {Platform.OS === 'ios' ? (
-              <InputAccessoryView nativeID={QR_TOKEN_INPUT_ACCESSORY_ID}>
-                <View style={styles.keyboardAccessory}>
-                  <Pressable onPress={() => Keyboard.dismiss()} style={styles.keyboardDoneButton}>
-                    <Text style={styles.keyboardDoneText}>Done</Text>
-                  </Pressable>
-                </View>
-              </InputAccessoryView>
-            ) : null}
-            {lastQrError ? <Text style={styles.errorText}>{lastQrError}</Text> : null}
-            <View style={styles.row}>
-              <ActionButton label="Scan QR" onPress={openScanner} disabled={busy} />
-              <ActionButton label="Queue Token" onPress={() => queueScan()} disabled={busy || !qrToken.trim()} />
+              <View style={[styles.statusPill, isMenuConstrained ? styles.statusPillConstrained : null, isOnline ? styles.online : styles.offline]}>
+                <Text style={styles.statusText}>{isOnline ? 'Online' : isOnline === false ? 'Offline' : 'Network'}</Text>
+              </View>
             </View>
-            <View style={styles.row}>
-              <ActionButton label={`Sync ${pendingCount}`} onPress={() => syncPending(false)} disabled={busy || pendingCount === 0} />
-              <ActionButton label="Refresh key" onPress={refreshJwks} disabled={busy || !isOnline} />
-            </View>
-            <Pressable onPress={logout} style={styles.secondaryButton}>
-              <Text style={styles.secondaryButtonText}>Logout</Text>
-            </Pressable>
-          </View>
 
-          <View style={styles.listHeader}>
-            <Text style={styles.sectionTitle}>Local Queue</Text>
-            <Text style={styles.queueText}>
-              {pendingCount} pending / {completedCount} done
-            </Text>
-            {busy ? <ActivityIndicator /> : null}
-          </View>
-          <FlatList
-            data={pending}
-            keyExtractor={(item) => item.idempotencyKey}
-            renderItem={({ item }) => (
-              <View style={styles.scanItem}>
-                <Text style={styles.scanTitle}>{item.resultCode ?? (item.synced ? 'synced' : 'pending')}</Text>
-                <Text style={styles.scanMeta}>{new Date(item.scannedAt).toLocaleString()}</Text>
-                <Text style={styles.scanMeta}>reg={item.regId ?? 'unknown'}</Text>
-                {item.errorMessage ? <Text style={styles.errorText}>{item.errorMessage}</Text> : null}
-                <Text style={styles.scanKey}>{item.idempotencyKey}</Text>
+            <ScrollView
+              style={styles.contentScroll}
+              contentContainerStyle={styles.contentScrollInner}
+              showsVerticalScrollIndicator
+              indicatorStyle="black"
+            >
+            {activePage === 'workshops' ? (
+              <View style={styles.pageSection}>
+                <View style={styles.listHeader}>
+                  <Text style={styles.sectionTitle}>Workshop được phân công</Text>
+                  <Text style={styles.queueText}>{staffWorkshops.length}</Text>
+                  {staffDataLoading ? <ActivityIndicator /> : null}
+                </View>
+                {staffWorkshops.length === 0 ? (
+                  <Text style={styles.helpText}>Chưa có workshop nào được phân công cho tài khoản này.</Text>
+                ) : (
+                  staffWorkshops.map((item) => (
+                    <Pressable
+                      key={item.id}
+                      onPress={() => setSelectedWorkshopId(item.id)}
+                      style={[styles.workshopCard, isMenuConstrained ? styles.itemCompact : null, item.id === selectedWorkshopId ? styles.workshopCardActive : null]}
+                    >
+                      <Text style={styles.workshopCardTitle}>{item.title}</Text>
+                      <Text style={styles.scanMeta}>
+                        {new Date(item.startAt).toLocaleString()} - {new Date(item.endAt).toLocaleString()}
+                      </Text>
+                      <Text style={styles.scanMeta}>
+                        Phòng: {item.roomCode ?? item.roomName ?? 'Chưa có'} | Diễn giả: {item.speakerName ?? 'Chưa có'}
+                      </Text>
+                      <Text style={styles.scanMeta}>Trạng thái: {item.status}</Text>
+                    </Pressable>
+                  ))
+                )}
               </View>
-            )}
-          />
-        </>
+            ) : null}
+
+            {activePage === 'staff' ? (
+              <View style={styles.pageSection}>
+                <View style={styles.listHeader}>
+                  <Text style={styles.sectionTitle}>Thông tin nhân viên</Text>
+                  {profileLoading || staffDataLoading ? <ActivityIndicator /> : null}
+                </View>
+                <View style={[styles.panel, isCompact ? styles.panelCompact : null, isMenuConstrained ? styles.panelConstrained : null]}>
+                  <Text style={styles.workshopTitle}>{staffProfile?.fullName ?? auth.fullName ?? 'Check-in staff'}</Text>
+                  <Text style={styles.scanMeta}>Email: {staffProfile?.email ?? auth.email ?? email}</Text>
+                  <Text style={styles.scanMeta}>User ID: {staffProfile?.id ?? auth.userId ?? 'Chưa tải'}</Text>
+                  <Text style={styles.scanMeta}>Vai trò: {(staffProfile?.roles ?? auth.roles ?? ['CHECKIN_STAFF']).join(', ')}</Text>
+                  {staffProfile?.phone ? <Text style={styles.scanMeta}>SĐT: {staffProfile.phone}</Text> : null}
+                  <Text style={styles.scanMeta}>Device: {deviceId}</Text>
+                  <Text style={styles.scanMeta}>Backend: {apiBaseUrl}</Text>
+                  <View style={[styles.row, forceSingleColumn ? styles.rowSingleColumn : null]}>
+                    <ActionButton label="Refresh staff" onPress={() => loadStaffProfile(false)} disabled={profileLoading || !isOnline} />
+                    <ActionButton label="Refresh workshop" onPress={() => loadStaffWorkshops(false)} disabled={staffDataLoading || !isOnline} />
+                  </View>
+                </View>
+              </View>
+            ) : null}
+
+            {activePage === 'info' ? (
+              <View style={styles.pageSection}>
+                <View style={styles.listHeader}>
+                  <Text style={styles.sectionTitle}>Thông tin phân công</Text>
+                  {staffDataLoading ? <ActivityIndicator /> : null}
+                </View>
+                <View style={[styles.panel, isCompact ? styles.panelCompact : null, isMenuConstrained ? styles.panelConstrained : null]}>
+                  {selectedWorkshop ? (
+                    <>
+                      <Text style={styles.workshopTitle}>{selectedWorkshop.title}</Text>
+                      <Text style={styles.scanMeta}>
+                        {new Date(selectedWorkshop.startAt).toLocaleString()} - {new Date(selectedWorkshop.endAt).toLocaleString()}
+                      </Text>
+                      <Text style={styles.scanMeta}>
+                        Phòng: {selectedWorkshop.roomCode ?? selectedWorkshop.roomName ?? 'Chưa có'} | Diễn giả: {selectedWorkshop.speakerName ?? 'Chưa có'}
+                      </Text>
+                      <Text style={styles.scanMeta}>Trạng thái: {selectedWorkshop.status}</Text>
+                      {selectedWorkshop.assignmentStartsAt ? (
+                        <Text style={styles.scanMeta}>
+                          Ca phân công: {new Date(selectedWorkshop.assignmentStartsAt).toLocaleString()} - {new Date(selectedWorkshop.assignmentEndsAt ?? selectedWorkshop.endAt).toLocaleString()}
+                        </Text>
+                      ) : null}
+                      {selectedWorkshop.description ? (
+                        <Text style={styles.descriptionText}>{selectedWorkshop.description}</Text>
+                      ) : null}
+                    </>
+                  ) : (
+                    <Text style={styles.helpText}>Chưa có workshop nào được phân công cho tài khoản này.</Text>
+                  )}
+                  <View style={[styles.row, forceSingleColumn ? styles.rowSingleColumn : null]}>
+                    <ActionButton label="Refresh" onPress={() => loadStaffWorkshops(false)} disabled={staffDataLoading || !isOnline} />
+                    <ActionButton label="Load sinh viên" onPress={() => loadWorkshopStudents(undefined, false)} disabled={!selectedWorkshopId || staffDataLoading || !isOnline} />
+                  </View>
+                </View>
+
+                {staffWorkshops.length > 1 ? (
+                  staffWorkshops.map((item) => (
+                      <Pressable
+                        key={item.id}
+                        onPress={() => setSelectedWorkshopId(item.id)}
+                        style={[styles.workshopCard, isMenuConstrained ? styles.itemCompact : null, item.id === selectedWorkshopId ? styles.workshopCardActive : null]}
+                      >
+                        <Text style={styles.workshopCardTitle}>{item.title}</Text>
+                        <Text style={styles.scanMeta}>{item.roomCode ?? item.roomName ?? 'Chưa có phòng'}</Text>
+                      </Pressable>
+                    ))
+                ) : null}
+              </View>
+            ) : null}
+
+            {activePage === 'checkin' ? (
+              <View style={styles.pageSection}>
+                <View style={[styles.panel, isCompact ? styles.panelCompact : null, isMenuConstrained ? styles.panelConstrained : null]}>
+                  <View style={styles.metaPanel}>
+                    <Text style={styles.metaText}>Workshop: {selectedWorkshop?.title ?? 'Chưa chọn'}</Text>
+                    <Text style={styles.metaText}>Device: {deviceId}</Text>
+                    <Text style={styles.metaText}>
+                      Public key: {jwks ? `${jwks.issuer}, ${new Date(jwks.fetchedAt).toLocaleString()}` : 'not cached'}
+                    </Text>
+                    <Text style={styles.metaText}>Last sync: {lastSyncMessage}</Text>
+                    <Text style={styles.metaText}>Demo mode: cho phép quét trước giờ workshop.</Text>
+                  </View>
+
+                  {scannerOpen ? (
+                    <View style={styles.cameraFrame}>
+                      <CameraView
+                        style={styles.camera}
+                        barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
+                        onBarcodeScanned={({ data }) => {
+                          if (!busy && data) void queueScan(data, 'camera');
+                        }}
+                      />
+                      <Pressable onPress={() => setScannerOpen(false)} style={styles.secondaryButton}>
+                        <Text style={styles.secondaryButtonText}>Close camera</Text>
+                      </Pressable>
+                    </View>
+                  ) : null}
+                  <TextInput
+                    value={qrToken}
+                    onChangeText={setQrToken}
+                    style={[styles.input, styles.qrInput]}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    blurOnSubmit
+                    inputAccessoryViewID={Platform.OS === 'ios' ? QR_TOKEN_INPUT_ACCESSORY_ID : undefined}
+                    multiline
+                    onSubmitEditing={() => Keyboard.dismiss()}
+                    placeholder="Paste QR token"
+                    placeholderTextColor="#94a3b8"
+                    returnKeyType="done"
+                  />
+                  {Platform.OS === 'ios' ? (
+                    <InputAccessoryView nativeID={QR_TOKEN_INPUT_ACCESSORY_ID}>
+                      <View style={styles.keyboardAccessory}>
+                        <Pressable onPress={() => Keyboard.dismiss()} style={styles.keyboardDoneButton}>
+                          <Text style={styles.keyboardDoneText}>Done</Text>
+                        </Pressable>
+                      </View>
+                    </InputAccessoryView>
+                  ) : null}
+                  {lastQrError ? <Text style={styles.errorText}>{lastQrError}</Text> : null}
+                  <View style={[styles.row, forceSingleColumn ? styles.rowSingleColumn : null]}>
+                    <ActionButton label="Scan QR" onPress={openScanner} disabled={busy} />
+                    <ActionButton label="Queue Token" onPress={() => queueScan()} disabled={busy || !qrToken.trim()} />
+                  </View>
+                  <View style={[styles.row, forceSingleColumn ? styles.rowSingleColumn : null]}>
+                    <ActionButton label={`Sync ${pendingCount}`} onPress={() => syncPending(false)} disabled={busy || pendingCount === 0} />
+                    <ActionButton label="Refresh key" onPress={refreshJwks} disabled={busy || !isOnline} />
+                  </View>
+                </View>
+              </View>
+            ) : null}
+
+            {activePage === 'students' ? (
+              <View style={styles.pageSection}>
+                <View style={styles.listHeader}>
+                  <View>
+                    <Text style={styles.sectionTitle}>Danh sách sinh viên</Text>
+                    <Text style={styles.scanMetaBreak}>Workshop: {selectedWorkshop?.title ?? 'Chưa chọn'}</Text>
+                    <Text style={styles.scanMeta}>{confirmedStudents} xác nhận / {visibleStudentRows.length} đăng ký</Text>
+                  </View>
+                  {staffDataLoading ? <ActivityIndicator /> : null}
+                </View>
+                <View style={[styles.row, forceSingleColumn ? styles.rowSingleColumn : null]}>
+                  <ActionButton label="Refresh" onPress={() => loadWorkshopStudents(undefined, false)} disabled={!selectedWorkshopId || staffDataLoading || !isOnline} />
+                </View>
+                {visibleStudentRows.length === 0 ? (
+                  <Text style={styles.helpText}>
+                    {selectedWorkshopId ? 'Chưa có sinh viên đăng ký hoặc chưa tải dữ liệu.' : 'Chọn workshop trong List workshop trước.'}
+                  </Text>
+                ) : (
+                  visibleStudentRows.map((item) => (
+                    <View key={item.registrationId} style={[styles.studentItem, isMenuConstrained ? styles.itemCompact : null]}>
+                      <View style={styles.studentRow}>
+                        <View style={styles.studentMain}>
+                          <Text style={styles.scanTitle}>{item.studentName}</Text>
+                          <Text style={styles.scanMeta}>{item.studentCode ?? item.email ?? item.studentId}</Text>
+                          <Text style={styles.scanMeta}>Đăng ký: {item.registrationStatus}</Text>
+                          {item.checkedInAt ? <Text style={styles.scanMeta}>Lúc quét: {new Date(item.checkedInAt).toLocaleString()}</Text> : null}
+                        </View>
+                        <View style={[styles.qrBadge, item.qrStatus === 'CONFIRMED' ? styles.qrBadgeOk : styles.qrBadgeWait]}>
+                          <Text style={styles.qrBadgeText}>{item.qrStatus === 'CONFIRMED' ? 'Xác nhận' : 'Chưa xác nhận'}</Text>
+                        </View>
+                      </View>
+                    </View>
+                  ))
+                )}
+              </View>
+            ) : null}
+
+            {activePage === 'queue' ? (
+              <View style={styles.pageSection}>
+                <View style={styles.listHeader}>
+                  <Text style={styles.sectionTitle}>Local Queue</Text>
+                  <Text style={styles.queueText}>
+                    {pendingCount} pending / {completedCount} done
+                  </Text>
+                  {busy ? <ActivityIndicator /> : null}
+                </View>
+                {pending.map((item) => (
+                    <View key={item.idempotencyKey} style={[styles.scanItem, isMenuConstrained ? styles.itemCompact : null]}>
+                      <Text style={styles.scanTitle}>{item.resultCode ?? (item.synced ? 'synced' : 'pending')}</Text>
+                      <Text style={styles.scanMeta}>{new Date(item.scannedAt).toLocaleString()}</Text>
+                      <Text style={styles.scanMeta}>reg={item.regId ?? 'unknown'}</Text>
+                      {item.errorMessage ? <Text style={styles.errorText}>{item.errorMessage}</Text> : null}
+                      <Text style={styles.scanKey}>{item.idempotencyKey}</Text>
+                    </View>
+                  ))}
+              </View>
+            ) : null}
+            </ScrollView>
+          </View>
+        </View>
       )}
     </SafeAreaView>
   );
@@ -766,6 +1132,30 @@ function ActionButton(props: { label: string; onPress: () => void; disabled?: bo
       <Text style={styles.buttonText}>{props.label}</Text>
     </Pressable>
   );
+}
+
+function NavButton(props: { label: string; active: boolean; onPress: () => void; compact?: boolean; nested?: boolean }) {
+  return (
+    <Pressable
+      onPress={props.onPress}
+      style={[
+        styles.navButton,
+        props.compact ? styles.navButtonCompact : null,
+        props.nested ? styles.navButtonNested : null,
+        props.active ? styles.navButtonActive : null,
+      ]}
+    >
+      <Text style={[styles.navButtonText, props.compact ? styles.navButtonTextCompact : null, props.active ? styles.navButtonTextActive : null]}>
+        {props.label}
+      </Text>
+    </Pressable>
+  );
+}
+
+function extractJwtToken(input: string): string {
+  const trimmed = input.trim();
+  const match = trimmed.match(/eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/);
+  return match?.[0] ?? trimmed;
 }
 
 function confirmAsync(title: string, message: string, confirmLabel: string): Promise<boolean> {
@@ -806,7 +1196,69 @@ function formatQrTime(unixSeconds: number): string {
 }
 
 const styles = StyleSheet.create({
-  page: { flex: 1, backgroundColor: '#f0f4f8', paddingHorizontal: 20, paddingTop: 12 },
+  page: { flex: 1, width: '100%', backgroundColor: '#f0f4f8', paddingHorizontal: 20, paddingTop: 12 },
+  pageCompact: { paddingHorizontal: 6, paddingTop: 8 },
+  appShell: { flex: 1, width: '100%', flexDirection: 'row', gap: 12, overflow: 'hidden' },
+  appShellCompact: { gap: 6 },
+  sidebar: {
+    width: 184,
+    backgroundColor: '#0f172a',
+    borderRadius: 18,
+    padding: 12,
+    gap: 14,
+    marginBottom: 10,
+    flexShrink: 0,
+  },
+  sidebarCompact: {
+    width: 104,
+    paddingHorizontal: 8,
+    paddingVertical: 10,
+    gap: 8,
+  },
+  sidebarTitle: { color: '#e2e8f0', fontSize: 13, fontWeight: '900', marginBottom: 4 },
+  navGroup: { gap: 7 },
+  sidebarLogout: {
+    marginTop: 'auto',
+    borderRadius: 12,
+    backgroundColor: '#fee2e2',
+    paddingHorizontal: 8,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  sidebarLogoutText: { color: '#991b1b', fontSize: 13, fontWeight: '900' },
+  navButton: {
+    borderRadius: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 10,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+  },
+  navButtonCompact: { paddingHorizontal: 6, paddingVertical: 8 },
+  navButtonNested: { marginLeft: 8, borderLeftWidth: 2, borderLeftColor: 'rgba(148,163,184,0.45)' },
+  navButtonActive: { backgroundColor: '#14b8a6' },
+  navButtonText: { color: '#cbd5e1', fontSize: 12, fontWeight: '800', lineHeight: 16 },
+  navButtonTextCompact: { fontSize: 10.5, lineHeight: 14 },
+  navButtonTextActive: { color: '#ffffff' },
+  content: { flex: 1, flexBasis: 0, flexShrink: 1, minWidth: 0, maxWidth: '100%', overflow: 'hidden' },
+  contentConstrained: { flexBasis: 0, flexShrink: 1, minWidth: 0 },
+  contentScroll: { flex: 1, width: '100%', maxWidth: '100%' },
+  contentScrollInner: { flexGrow: 1, minWidth: 0, paddingRight: 4, paddingBottom: 28 },
+  contentHeader: { marginBottom: 14, paddingTop: 4, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10, flexWrap: 'wrap' },
+  contentHeaderCompact: { alignItems: 'stretch' },
+  contentHeaderConstrained: { gap: 8, marginBottom: 10 },
+  headerTitleGroup: { flex: 1, minWidth: 210 },
+  headerTitleGroupConstrained: { minWidth: 0, width: '100%' },
+  menuButton: {
+    alignSelf: 'flex-start',
+    borderRadius: 999,
+    backgroundColor: '#e0f2fe',
+    borderColor: '#bae6fd',
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    marginBottom: 8,
+  },
+  menuButtonText: { color: '#0369a1', fontSize: 13, fontWeight: '900' },
+  pageSection: { flex: 1, width: '100%', minWidth: 0, gap: 12 },
   loginContainer: { flex: 1, justifyContent: 'center', paddingBottom: 36 },
   loginHeader: { marginBottom: 22, paddingHorizontal: 4 },
   loginCard: {
@@ -824,21 +1276,29 @@ const styles = StyleSheet.create({
   helpText: { color: '#64748b', fontSize: 13, lineHeight: 18, textAlign: 'center' },
   header: { marginBottom: 24, paddingTop: 12, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
   title: { color: '#0f172a', fontSize: 30, fontWeight: '800', letterSpacing: 0 },
+  titleCompact: { fontSize: 24, lineHeight: 30 },
+  titleConstrained: { fontSize: 21, lineHeight: 26 },
   subtitle: { color: '#64748b', marginTop: 8, fontSize: 15, fontWeight: '500', lineHeight: 21 },
+  subtitleConstrained: { marginTop: 4, fontSize: 13, lineHeight: 18 },
   statusPill: { alignSelf: 'flex-start', borderRadius: 999, paddingHorizontal: 12, paddingVertical: 8, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 },
+  statusPillConstrained: { paddingHorizontal: 10, paddingVertical: 6 },
   online: { backgroundColor: '#dcfce7', borderWidth: 1, borderColor: '#bbf7d0' },
   offline: { backgroundColor: '#fee2e2', borderWidth: 1, borderColor: '#fecaca' },
   statusText: { color: '#0f172a', fontSize: 13, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5 },
-  panel: { gap: 14, marginBottom: 24, backgroundColor: '#ffffff', padding: 20, borderRadius: 24, shadowColor: '#000', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.06, shadowRadius: 16, elevation: 4 },
+  panel: { width: '100%', minWidth: 0, gap: 14, marginBottom: 24, backgroundColor: '#ffffff', padding: 20, borderRadius: 24, shadowColor: '#000', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.06, shadowRadius: 16, elevation: 4 },
+  panelCompact: { padding: 16, borderRadius: 18, marginBottom: 16 },
+  panelConstrained: { padding: 12, borderRadius: 14, gap: 12 },
   label: { color: '#334155', fontSize: 13, fontWeight: '700', marginLeft: 4, textTransform: 'uppercase', letterSpacing: 0 },
-  metaPanel: { backgroundColor: '#f8fafc', borderColor: '#e2e8f0', borderWidth: 1, borderRadius: 16, padding: 14, gap: 6 },
-  metaText: { color: '#475569', fontSize: 13, fontWeight: '500' },
+  metaPanel: { width: '100%', minWidth: 0, backgroundColor: '#f8fafc', borderColor: '#e2e8f0', borderWidth: 1, borderRadius: 16, padding: 14, gap: 6 },
+  metaText: { color: '#475569', fontSize: 13, fontWeight: '500', flexShrink: 1, flexWrap: 'wrap' },
   input: {
     borderWidth: 1,
     borderColor: '#cbd5e1',
     borderRadius: 16,
     backgroundColor: '#ffffff',
     color: '#0f172a',
+    width: '100%',
+    maxWidth: '100%',
     paddingHorizontal: 16,
     paddingVertical: 14,
     fontSize: 15,
@@ -858,16 +1318,34 @@ const styles = StyleSheet.create({
   keyboardDoneText: { color: '#0f766e', fontSize: 16, fontWeight: '800' },
   cameraFrame: { borderRadius: 16, overflow: 'hidden', backgroundColor: '#0f172a', borderWidth: 1, borderColor: '#e2e8f0' },
   camera: { height: 300 },
-  row: { flexDirection: 'row', gap: 12 },
-  button: { flex: 1, minHeight: 52, justifyContent: 'center', backgroundColor: '#0f766e', borderRadius: 16, paddingHorizontal: 14, paddingVertical: 15, alignItems: 'center', shadowColor: '#0f766e', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 5 },
+  row: { width: '100%', minWidth: 0, flexDirection: 'row', gap: 12, flexWrap: 'wrap' },
+  rowSingleColumn: { flexDirection: 'column', alignItems: 'stretch', gap: 10 },
+  button: { flex: 1, minWidth: 0, minHeight: 52, justifyContent: 'center', backgroundColor: '#0f766e', borderRadius: 16, paddingHorizontal: 12, paddingVertical: 14, alignItems: 'center', shadowColor: '#0f766e', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 5 },
   buttonDisabled: { backgroundColor: '#94a3b8', shadowOpacity: 0 },
   buttonText: { color: '#ffffff', fontWeight: '800', fontSize: 15, letterSpacing: 0, textAlign: 'center' },
   secondaryButton: { alignItems: 'center', padding: 12, marginTop: 4 },
   secondaryButtonText: { color: '#475569', fontWeight: '700', fontSize: 15 },
-  listHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, gap: 8, paddingHorizontal: 4 },
+  listHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, gap: 8, paddingHorizontal: 4, flexWrap: 'wrap' },
   sectionTitle: { color: '#0f172a', fontSize: 20, fontWeight: '800' },
   queueText: { color: '#64748b', fontSize: 14, fontWeight: '600', backgroundColor: '#e2e8f0', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 },
+  workshopTitle: { color: '#0f172a', fontSize: 22, fontWeight: '900', lineHeight: 28 },
+  descriptionText: { color: '#334155', marginTop: 12, fontSize: 14, lineHeight: 21, fontWeight: '500' },
+  workshopCard: {
+    width: '100%',
+    minWidth: 0,
+    backgroundColor: '#ffffff',
+    borderColor: '#e2e8f0',
+    borderWidth: 1,
+    borderRadius: 16,
+    padding: 14,
+    marginBottom: 10,
+  },
+  itemCompact: { padding: 12, borderRadius: 12 },
+  workshopCardActive: { borderColor: '#14b8a6', backgroundColor: '#f0fdfa' },
+  workshopCardTitle: { color: '#0f172a', fontSize: 15, fontWeight: '800' },
   scanItem: {
+    width: '100%',
+    minWidth: 0,
     backgroundColor: '#ffffff',
     borderColor: '#e2e8f0',
     borderWidth: 1,
@@ -877,7 +1355,24 @@ const styles = StyleSheet.create({
     shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.03, shadowRadius: 8, elevation: 2
   },
   scanTitle: { color: '#0f172a', fontWeight: '800', fontSize: 15, textTransform: 'uppercase' },
-  scanMeta: { color: '#64748b', marginTop: 6, fontSize: 13, fontWeight: '500' },
-  scanKey: { color: '#94a3b8', marginTop: 8, fontSize: 11, fontFamily: 'monospace' },
+  scanMeta: { color: '#64748b', marginTop: 6, fontSize: 13, fontWeight: '500', flexShrink: 1, flexWrap: 'wrap' },
+  scanMetaBreak: { color: '#64748b', marginTop: 6, fontSize: 13, fontWeight: '500', flexShrink: 1, flexWrap: 'wrap' },
+  scanKey: { color: '#94a3b8', marginTop: 8, fontSize: 11, fontFamily: 'monospace', flexShrink: 1, flexWrap: 'wrap' },
+  studentItem: {
+    width: '100%',
+    minWidth: 0,
+    backgroundColor: '#ffffff',
+    borderColor: '#e2e8f0',
+    borderWidth: 1,
+    borderRadius: 16,
+    padding: 14,
+    marginBottom: 10,
+  },
+  studentRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' },
+  studentMain: { flex: 1, minWidth: 0 },
+  qrBadge: { borderRadius: 999, paddingHorizontal: 10, paddingVertical: 8, maxWidth: 132 },
+  qrBadgeOk: { backgroundColor: '#dcfce7' },
+  qrBadgeWait: { backgroundColor: '#f1f5f9' },
+  qrBadgeText: { color: '#0f172a', fontSize: 12, fontWeight: '900', textAlign: 'center' },
   errorText: { color: '#dc2626', marginTop: 6, fontSize: 13, fontWeight: '600', backgroundColor: '#fef2f2', padding: 8, borderRadius: 8, overflow: 'hidden' },
 });

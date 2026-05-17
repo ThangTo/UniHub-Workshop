@@ -15,7 +15,6 @@ export function WorkshopDetailScreen() {
   useEffect(() => {
     if (!id) return;
     let cancelled = false;
-    let timer: ReturnType<typeof setTimeout> | null = null;
 
     async function load(showSpinner = false) {
       if (showSpinner) setW(null);
@@ -23,10 +22,6 @@ export function WorkshopDetailScreen() {
         const r = await api.get<WorkshopDetail>(`/workshops/${id}`);
         if (cancelled) return;
         setW(r.data);
-        // Polling summary nếu PENDING — backoff 3s.
-        if (r.data.summaryStatus === 'PENDING') {
-          timer = setTimeout(() => void load(false), 3000);
-        }
       } catch (e) {
         if (!cancelled) setError(apiError(e, 'Không tải được workshop.'));
       }
@@ -34,7 +29,6 @@ export function WorkshopDetailScreen() {
     void load(true);
     return () => {
       cancelled = true;
-      if (timer) clearTimeout(timer);
     };
   }, [id]);
 
@@ -94,8 +88,6 @@ export function WorkshopDetailScreen() {
             {w.description}
           </div>
         </div>
-
-        <SummaryCard w={w} />
       </div>
 
       <aside className="space-y-4">
@@ -127,57 +119,4 @@ export function WorkshopDetailScreen() {
       </aside>
     </div>
   );
-}
-
-function SummaryCard({ w }: { w: WorkshopDetail }) {
-  const status = w.summaryStatus;
-  return (
-    <div className="card p-6">
-      <div className="mb-3 flex items-center justify-between">
-        <h2 className="text-lg font-semibold text-slate-900">Tóm tắt AI</h2>
-        <SummaryBadge status={status} />
-      </div>
-      {status === 'NONE' && (
-        <p className="text-sm text-slate-500">
-          Ban tổ chức chưa cung cấp tóm tắt cho workshop này.
-        </p>
-      )}
-      {status === 'PENDING' && (
-        <p className="text-sm text-slate-500">
-          Đang sinh tóm tắt từ tài liệu PDF — sẽ tự động cập nhật sau vài giây.
-        </p>
-      )}
-      {status === 'FAILED' && (
-        <p className="text-sm text-red-600">
-          Sinh tóm tắt thất bại — ban tổ chức cần thử lại.
-        </p>
-      )}
-      {status === 'READY' && (
-        <div className="space-y-4">
-          <p className="whitespace-pre-wrap text-sm leading-6 text-slate-700">{w.summary}</p>
-          {w.highlights && w.highlights.length > 0 && (
-            <div>
-              <div className="mb-2 text-sm font-medium text-slate-700">Điểm nổi bật</div>
-              <ul className="list-disc space-y-1 pl-5 text-sm text-slate-700">
-                {w.highlights.map((h, i) => (
-                  <li key={i}>{h}</li>
-                ))}
-              </ul>
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function SummaryBadge({ status }: { status: WorkshopDetail['summaryStatus'] }) {
-  const map = {
-    NONE: ['bg-slate-100 text-slate-600', 'Chưa có'],
-    PENDING: ['bg-amber-100 text-amber-700', 'Đang xử lý'],
-    READY: ['bg-emerald-100 text-emerald-700', 'Đã sẵn'],
-    FAILED: ['bg-red-100 text-red-700', 'Lỗi'],
-  } as const;
-  const [cls, label] = map[status] ?? map.NONE;
-  return <span className={`badge ${cls}`}>{label}</span>;
 }

@@ -1,13 +1,28 @@
 import { FormEvent, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api, apiError } from '../lib/api';
-import type { CreateWorkshopInput, RoomOption, SpeakerOption, WorkshopFormOptions, WorkshopSummary } from '../lib/types';
+import type {
+  CreateWorkshopInput,
+  RoomOption,
+  SpeakerOption,
+  WorkshopFormOptions,
+  WorkshopStatus,
+  WorkshopSummary,
+} from '../lib/types';
 import { formatCurrency, formatDateTime, fromLocalInput, toLocalInput } from '../lib/format';
 import clsx from 'clsx';
 
 const WORKSHOP_EDIT_FORM_ID = 'workshop-edit-form';
+const WORKSHOP_STATUS_OPTIONS: Array<{ value: WorkshopStatus; label: string }> = [
+  { value: 'DRAFT', label: 'Bản nháp' },
+  { value: 'PUBLISHED', label: 'Đã publish' },
+  { value: 'CANCELLED', label: 'Đã hủy' },
+  { value: 'ENDED', label: 'Đã kết thúc' },
+];
 
-const emptyForm: CreateWorkshopInput = {
+type WorkshopEditForm = CreateWorkshopInput & { status: WorkshopStatus };
+
+const emptyForm: WorkshopEditForm = {
   title: '',
   description: '',
   startAt: '',
@@ -16,13 +31,14 @@ const emptyForm: CreateWorkshopInput = {
   feeAmount: 0,
   speakerId: null,
   roomId: null,
+  status: 'DRAFT',
 };
 
 export function WorkshopDetailAdminScreen() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [w, setW] = useState<WorkshopSummary | null>(null);
-  const [form, setForm] = useState<CreateWorkshopInput>(emptyForm);
+  const [form, setForm] = useState<WorkshopEditForm>(emptyForm);
   const [version, setVersion] = useState<number | null>(null);
   const [speakerOptions, setSpeakerOptions] = useState<SpeakerOption[]>([]);
   const [roomOptions, setRoomOptions] = useState<RoomOption[]>([]);
@@ -33,9 +49,10 @@ export function WorkshopDetailAdminScreen() {
   const [busy, setBusy] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
 
-  function applyWorkshop(workshop: WorkshopSummary) {
+  function applyWorkshop(workshop: WorkshopSummary, syncForm = true) {
     setW(workshop);
     setVersion(workshop.version ?? null);
+    if (!syncForm) return;
     setForm({
       title: workshop.title,
       description: workshop.description,
@@ -45,28 +62,25 @@ export function WorkshopDetailAdminScreen() {
       feeAmount: workshop.feeAmount,
       speakerId: workshop.speakerId ?? null,
       roomId: workshop.roomId ?? null,
+      status: workshop.status,
     });
   }
 
-  async function refreshWorkshop() {
+  async function refreshWorkshop(syncForm = true) {
     if (!id) return;
     const r = await api.get<WorkshopSummary>(`/workshops/admin/${id}`);
-    applyWorkshop(r.data);
+    applyWorkshop(r.data, syncForm);
   }
 
   useEffect(() => {
     if (!id) return;
     let cancelled = false;
-    let timer: ReturnType<typeof setTimeout> | null = null;
 
     async function load() {
       try {
         const r = await api.get<WorkshopSummary>(`/workshops/admin/${id}`);
         if (cancelled) return;
         applyWorkshop(r.data);
-        if (r.data.summaryStatus === 'PENDING') {
-          timer = setTimeout(load, 3000);
-        }
       } catch (e) {
         if (!cancelled) setError(apiError(e));
       }
@@ -74,9 +88,27 @@ export function WorkshopDetailAdminScreen() {
     void load();
     return () => {
       cancelled = true;
-      if (timer) clearTimeout(timer);
     };
   }, [id]);
+
+  useEffect(() => {
+    if (!id || w?.summaryStatus !== 'PENDING') return;
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const r = await api.get<WorkshopSummary>(`/workshops/admin/${id}`);
+        if (!cancelled) applyWorkshop(r.data, false);
+      } catch (e) {
+        if (!cancelled) setError(apiError(e));
+      }
+    };
+    const interval = setInterval(() => void poll(), 3000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [id, w?.summaryStatus]);
 
   useEffect(() => {
     let cancelled = false;
@@ -94,7 +126,7 @@ export function WorkshopDetailAdminScreen() {
     };
   }, []);
 
-  function update<K extends keyof CreateWorkshopInput>(key: K, val: CreateWorkshopInput[K]) {
+  function update<K extends keyof WorkshopEditForm>(key: K, val: WorkshopEditForm[K]) {
     setSaveMessage(null);
     setForm((current) => ({ ...current, [key]: val }));
   }
@@ -183,7 +215,7 @@ export function WorkshopDetailAdminScreen() {
       await api.post(`/workshops/${id}/pdf`, fd, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
-      await refreshWorkshop();
+      await refreshWorkshop(false);
     } catch (e) {
       alert(apiError(e, 'Upload PDF thất bại.'));
     } finally {
@@ -197,7 +229,7 @@ export function WorkshopDetailAdminScreen() {
     setBusy('retry');
     try {
       await api.post(`/workshops/${id}/summary/retry`);
-      await refreshWorkshop();
+      await refreshWorkshop(false);
     } catch (e) {
       alert(apiError(e, 'Retry thất bại.'));
     } finally {
@@ -276,8 +308,8 @@ export function WorkshopDetailAdminScreen() {
               <div>
                 <label className="label">Mô tả</label>
                 <textarea
-                  className="input min-h-32"
-                  rows={5}
+                  className="input min-h-48"
+                  rows={9}
                   value={form.description}
                   onChange={(e) => update('description', e.target.value)}
                 />
@@ -304,7 +336,7 @@ export function WorkshopDetailAdminScreen() {
                   />
                 </div>
               </div>
-              <div className="grid gap-4 sm:grid-cols-2">
+              <div className="grid gap-4 sm:grid-cols-3">
                 <div>
                   <label className="label">Sức chứa</label>
                   <input
@@ -327,6 +359,20 @@ export function WorkshopDetailAdminScreen() {
                     value={form.feeAmount}
                     onChange={(e) => update('feeAmount', Number(e.target.value))}
                   />
+                </div>
+                <div>
+                  <label className="label">Trạng thái</label>
+                  <select
+                    className="input"
+                    value={form.status}
+                    onChange={(e) => update('status', e.target.value as WorkshopStatus)}
+                  >
+                    {WORKSHOP_STATUS_OPTIONS.map((status) => (
+                      <option key={status.value} value={status.value}>
+                        {status.label}
+                      </option>
+                    ))}
+                  </select>
                 </div>
               </div>
               <div className="grid gap-4 sm:grid-cols-2">
