@@ -1,5 +1,5 @@
 # Smoke test - Phase 4 AI Summary
-# Pre-reqs: infra docker compose up; mock-ai on :4100; backend on :3000;
+# Pre-reqs: backend on :3000 with GEMINI_API_KEY; seed data exists;
 #           PDF mau: scripts/test-workshop.pdf (run: node scripts/make-test-pdf.js).
 
 $ErrorActionPreference = 'Stop'

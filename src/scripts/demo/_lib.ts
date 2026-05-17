@@ -91,7 +91,7 @@ export async function loginForAccessToken(apiBaseUrl: string, email: string, pas
   return body.accessToken;
 }
 
-export function signAccessToken(userId: string, roles: RoleName[]): string {
+export function signAccessToken(userId: string, roles: RoleName[], expiresIn = '15m'): string {
   const rawPrivateKey = process.env.JWT_PRIVATE_KEY;
   if (!rawPrivateKey) {
     throw new Error(
@@ -105,8 +105,20 @@ export function signAccessToken(userId: string, roles: RoleName[]): string {
   return jwt.sign(
     { sub: userId, roles, jti: crypto.randomUUID() },
     privateKey,
-    { algorithm: 'RS256', issuer, expiresIn: '15m' },
+    { algorithm: 'RS256', issuer, expiresIn },
   );
+}
+
+export function verifyAccessToken(token: string): void {
+  const rawPublicKey = process.env.JWT_PUBLIC_KEY;
+  if (!rawPublicKey) {
+    throw new Error('JWT_PUBLIC_KEY is missing. Cannot verify generated token.');
+  }
+
+  const publicKey = decodeEnvValue(rawPublicKey);
+  const issuer = process.env.JWT_ISSUER ?? 'unihub-workshop';
+  const jwt = requireBackend<typeof import('jsonwebtoken')>('jsonwebtoken');
+  jwt.verify(token, publicKey, { algorithms: ['RS256'], issuer });
 }
 
 export async function ensureUserWithRoles(
@@ -276,7 +288,7 @@ function loadBackendEnv(srcRoot: string): void {
   }
 }
 
-function requireBackend<T>(moduleName: string): T {
+export function requireBackend<T>(moduleName: string): T {
   const srcRoot = findSrcRoot(process.cwd());
   const backendRequire = createRequire(path.join(srcRoot, 'apps', 'backend', 'package.json'));
   return backendRequire(moduleName) as T;
