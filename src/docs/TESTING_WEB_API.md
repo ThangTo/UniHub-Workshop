@@ -2,7 +2,8 @@
 
 Tai lieu nay dung de test cac luong chinh cua do an tren Docker full stack:
 backend, database, Redis, RabbitMQ, MinIO, Mailhog, mock payment gateway,
-mock AI, Student Web va Admin Web.
+Student Web va Admin Web. AI Summary hien goi Gemini API that qua
+`GEMINI_API_KEY`; `services/mock-ai` chi con la legacy service.
 
 ## 1. Yeu Cau Truoc Khi Chay
 
@@ -25,25 +26,29 @@ docker compose version
 Di chuyen vao workspace source:
 
 ```powershell
-cd d:\HCMUS\Nam_3\HK2\TKPM\Project\UniHubWorkshop\src
+cd <repo>\src
 ```
 
 ## 1.1 Co Can Tao `.env` Khong?
 
 Neu chay full stack bang Docker, ban khong bat buoc tao `.env`. File
 `docker-compose.yml` da co default dev values cho DB, Redis, RabbitMQ, MinIO,
-Mailhog SMTP, mock payment gateway va mock AI.
+Mailhog SMTP va mock payment gateway.
+
+Rieng AI Summary can `GEMINI_API_KEY` hop le. Neu chay Docker Compose va can
+test upload PDF -> summary, copy root `.env.example` thanh `src/.env` va dien
+key truoc khi start/recreate backend:
 
 Muon xem/toy bien env thi copy:
 
 ```powershell
-Copy-Item .env.example .env
+if (!(Test-Path .env)) { Copy-Item .env.example .env }
 ```
 
 Neu chay backend local ngoai Docker, tao file `apps/backend/.env` tu:
 
 ```powershell
-Copy-Item apps/backend/.env.example apps/backend/.env
+if (!(Test-Path apps/backend/.env)) { Copy-Item apps/backend/.env.example apps/backend/.env }
 ```
 
 Chi tiet tung bien nam o `docs/ENVIRONMENT.md`.
@@ -78,8 +83,11 @@ Expected:
 - `unihub-student-web`: up
 - `unihub-admin-web`: up
 - `unihub-mock-pg`: up
-- `unihub-mock-ai`: up
 - `unihub-mailhog`: up
+
+Luu y: `unihub-mock-ai` khong nam trong `--profile all`. Neu can chay legacy
+mock service rieng thi dung `pnpm mocks:up`, nhung code AI Summary hien tai
+khong goi service nay.
 
 Kiem tra backend:
 
@@ -139,7 +147,9 @@ MSSV co san de sinh vien dang ky tai khoan:
 - `22120004`
 - `22120005`
 
-Neu MSSV bao da lien ket voi tai khoan khac, dung MSSV khac hoac reset database:
+Neu MSSV bao da lien ket voi tai khoan khac, dung MSSV khac la nhanh nhat. Neu
+can reset database sach, dung data folder moi hoac don `src/data` sau khi da
+backup bang chung can nop, roi start va seed lai:
 
 ```powershell
 pnpm stack:down
@@ -276,10 +286,15 @@ Expected:
 
 - Upload tra `PENDING` hoac `READY` neu cache hit.
 - Worker doc PDF tu MinIO.
-- Mock AI sinh summary 200-300 tu va 5 highlights.
+- Gemini sinh summary tieng Viet va 5 highlights.
 - Re-upload cung PDF tra `cacheHit=true`.
 
-Neu mock AI random fail, bam Retry Summary.
+Neu AI fail do thieu/sai key, quota hoac loi mang, sua `GEMINI_API_KEY`, restart
+backend, roi bam Retry Summary:
+
+```powershell
+docker compose --profile all up -d --force-recreate backend
+```
 
 ### 5.3 Staff assignments
 
@@ -370,7 +385,7 @@ Expected:
 
 - Build xanh cho backend, mobile, student-web, admin-web, mock-ai, mock-pg.
 - Lint TypeScript xanh.
-- Unit tests xanh.
+- Unit tests xanh. Hien tai `pnpm test` chay Vitest o backend.
 - Docker build xanh.
 
 ## 8. Stop Stack
@@ -381,10 +396,12 @@ Stop nhung giu data:
 docker compose --profile all down
 ```
 
-Stop va xoa data:
+Stop va xoa Docker named/anonymous volumes:
 
 ```powershell
 pnpm stack:down
 ```
 
-Can than: `stack:down` co `-v`, se xoa volume/container data.
+Luu y: compose dang bind mount `src/data/*`, nen `stack:down` khong dam bao
+xoa sach cac file runtime trong thu muc nay. Neu can reset DB sach, dung data
+folder moi hoac don `src/data` sau khi da backup bang chung can nop.

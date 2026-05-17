@@ -1,13 +1,29 @@
 # UniHub Workshop - Huong Dan Test Demo Scripts Va Load
 
-Tai lieu nay dung de tao bang chung cho cac success criteria ve concurrency,
-idempotency, offline check-in, AI summary, CSV sync va load test.
+Tai lieu nay dung de chay test/demo va thu thap bang chung nop bai theo yeu
+cau trong file de bai HTML:
 
-## 1. Chay Nhanh Tat Ca Build/Test
+- Source `src/` phai chay duoc bang README/runbook.
+- Co seed data hoac script tao du lieu mau.
+- Demo truc tiep tren code/app dang chay, khong chi mo phong tren slide.
+- Chung minh cac co che ky thuat da thiet ke: concurrency, idempotency,
+  circuit breaker, notification, offline check-in, AI summary, CSV sync va
+  observability.
 
-Tu thu muc `src`:
+Tat ca lenh ben duoi chay tu thu muc `src`:
 
 ```powershell
+cd <repo>\src
+```
+
+Neu can kich ban quay video theo de bai, xem `docs/VIDEO_DEMO_SCRIPT.md`.
+
+## 1. Kiem Tra Build, Lint, Unit Test
+
+Chay truoc khi quay demo hoac nop source:
+
+```powershell
+pnpm install
 pnpm build
 pnpm lint
 pnpm test
@@ -17,22 +33,80 @@ docker compose --profile all build
 
 Expected:
 
-- Build xanh.
-- Lint xanh.
-- Unit tests xanh.
-- Docker config/build xanh.
+- Backend, mobile, student-web, admin-web, mock-pg, mock-ai build xanh.
+- TypeScript lint/typecheck xanh.
+- `pnpm test` hien tai chay Vitest cho backend, gom:
+  - `apps/backend/src/modules/catalog/catalog.service.spec.ts`
+  - `apps/backend/src/modules/payment/payment-refund.service.spec.ts`
+- Docker compose config/build xanh.
 
-Neu chay bang Docker full stack, khong can tao `.env` vi `docker-compose.yml`
-da co default dev values. Neu chay backend local hoac can JWT key co dinh cho
-demo scripts, xem `docs/ENVIRONMENT.md`.
-
-## 2. Smoke Test AI Summary
-
-Start stack:
+Neu chi can test nhanh unit backend:
 
 ```powershell
+pnpm --filter ./apps/backend test
+```
+
+## 2. Start Stack Va Seed Data
+
+Docker full stack khong bat buoc co `.env`, vi `docker-compose.yml` da co default
+dev values. Tuy nhien AI summary dung Gemini API that, nen neu can test AI bang
+Docker Compose thi set `GEMINI_API_KEY` trong `src/.env` truoc khi start/recreate
+backend. Neu chay backend local bang `pnpm dev:backend`, set key trong
+`src/apps/backend/.env`.
+
+```powershell
+if (!(Test-Path .env)) { Copy-Item .env.example .env }
+# Sua .env neu can: GEMINI_API_KEY, JWT_PRIVATE_KEY/JWT_PUBLIC_KEY, port...
 pnpm stack:up
 docker compose --profile all exec backend pnpm run seed
+docker compose --profile all ps
+```
+
+Expected services voi `--profile all`:
+
+- `unihub-postgres`: healthy
+- `unihub-redis`: healthy
+- `unihub-rabbitmq`: healthy
+- `unihub-minio`: healthy
+- `unihub-mailhog`: up
+- `unihub-backend`: healthy
+- `unihub-mock-pg`: up
+- `unihub-student-web`: up
+- `unihub-admin-web`: up
+
+Luu y: `services/mock-ai` la legacy service. Code AI summary hien tai goi
+Gemini truc tiep qua `GEMINI_API_KEY`, khong goi mock-ai trong full stack.
+
+Kiem tra backend:
+
+```powershell
+Invoke-RestMethod http://localhost:3000/health
+Invoke-WebRequest http://localhost:3000/metrics -UseBasicParsing
+```
+
+Tai khoan seed chinh:
+
+| Vai tro | Email | Password |
+| --- | --- | --- |
+| SYS_ADMIN | `admin@unihub.local` | `Admin@123456` |
+| ORGANIZER | `organizer@unihub.local` | `Test@12345` |
+| CHECKIN_STAFF | `staff@unihub.local` | `Test@12345` |
+
+## 3. Smoke Test AI Summary
+
+Muc tieu: chung minh flow PDF -> MinIO -> RabbitMQ worker -> Gemini -> cache
+theo SHA-256.
+
+Preconditions:
+
+- Stack da running va seed da chay.
+- Backend co `GEMINI_API_KEY` hop le.
+- PDF mau ton tai tai `scripts/test-workshop.pdf`.
+
+Neu thieu PDF mau:
+
+```powershell
+node scripts/make-test-pdf.js
 ```
 
 Chay smoke:
@@ -43,95 +117,84 @@ powershell -ExecutionPolicy Bypass -File scripts/smoke-ai-summary.ps1
 
 Expected:
 
-- Upload PDF thanh cong.
-- Status tu `PENDING` sang `READY`.
-- Summary co noi dung tieng Viet.
-- Co 5 highlights.
-- Re-upload cung PDF tra cache hit.
+- Login organizer thanh cong.
+- Tao/chon workshop thanh cong.
+- Upload PDF tra `PENDING` hoac `READY` neu cache hit.
+- Poll `GET /workshops/{id}/summary` den `READY`.
+- Summary co noi dung tieng Viet va highlights.
+- Re-upload cung PDF tra `cacheHit=true`, `READY` ngay.
 
-Neu mock AI random fail:
+Neu status `FAILED`, kiem tra `summaryHighlights.error`. Loi thuong gap:
 
-- Script co the test retry.
-- Hoac chay lai mot lan nua.
+- `gemini_api_key_missing`: chua set `GEMINI_API_KEY`.
+- `gemini_401`/`gemini_403`: key sai hoac chua enable API.
+- `gemini_429`: quota/rate limit.
+- `text_too_short`: PDF khong du noi dung.
 
-## 3. Smoke Test CSV Sync
+Sau khi sua env/key, restart backend va goi Retry Summary tren Admin Web hoac
+API `POST /workshops/{id}/summary/retry`:
+
+```powershell
+docker compose --profile all up -d --force-recreate backend
+```
+
+## 4. Smoke Test CSV Sync
+
+Muc tieu: chung minh sync danh sach sinh vien tu CSV, co archive/quarantine va
+skip duplicate theo SHA.
+
+Chay voi Docker backend:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts/smoke-csv-sync.ps1
 ```
 
+Script mac dinh ghi file vao `src/data/csv-*`, khop voi volume mount cua backend
+Docker. Neu chay backend local bang `pnpm dev:backend`, backend dung
+`apps/backend/data/csv-*`; khi do set:
+
+```powershell
+$env:UNIHUB_CSV_DATA_ROOT = "apps/backend/data"
+powershell -ExecutionPolicy Bypass -File scripts/smoke-csv-sync.ps1
+```
+
 Expected:
 
-- Valid CSV: `SUCCESS`.
-- Duplicate SHA: skip.
-- Bad header: `FAILED` va move vao quarantine.
-- Partial invalid rows: `PARTIAL` va co `errorLog.failedRows`.
+- Valid CSV: job `SUCCESS`.
+- Re-drop cung SHA: skip, khong tao job moi.
+- Bad header: job `FAILED`, file vao quarantine.
+- Partial invalid rows: job `PARTIAL`, co `errorLog.failedRows`.
 
-## 4. Demo Race Condition: 100/1000 Client Tranh 1 Ghe
+## 5. Demo Race Condition: Nhieu Client Tranh 1 Ghe
 
 Muc tieu: chung minh seat allocation atomic, khong oversell.
 
-Script:
+Demo script tao token truc tiep bang private key, vi vay backend va script phai
+dung cung `JWT_PRIVATE_KEY/JWT_PUBLIC_KEY`. Nen set stable JWT key trong
+`src/.env` hoac `src/apps/backend/.env` truoc khi start backend.
 
-```text
-scripts/demo/race-condition.ts
-```
-
-Mac dinh chay 100 clients. Co the tang toi 1000.
-
-### 4.1 Yeu cau rieng cua demo scripts
-
-Demo scripts tao token truc tiep bang private key. Vi vay can backend va script
-dung chung `JWT_PRIVATE_KEY`.
-
-Khuyen nghi chay demo scripts voi backend local hoac backend Docker co env key co
-dinh.
-
-Neu chay local backend:
-
-1. Tao file env:
+Tao RSA key pair de paste vao env:
 
 ```powershell
-Copy-Item .env.example apps/backend/.env -Force
+node -e "const {generateKeyPairSync}=require('crypto'); const {privateKey, publicKey}=generateKeyPairSync('rsa',{modulusLength:2048,publicKeyEncoding:{type:'spki',format:'pem'},privateKeyEncoding:{type:'pkcs8',format:'pem'}}); console.log('JWT_PRIVATE_KEY=' + JSON.stringify(privateKey)); console.log('JWT_PUBLIC_KEY=' + JSON.stringify(publicKey));"
 ```
 
-2. Sua `apps/backend/.env` de dung host localhost:
-
-```env
-DATABASE_URL=postgresql://unihub:unihub@localhost:5432/unihub?schema=public
-REDIS_URL=redis://localhost:6379
-RABBITMQ_URL=amqp://unihub:unihub@localhost:5672
-MINIO_ENDPOINT=localhost
-MOCK_PG_URL=http://localhost:4000
-MOCK_AI_URL=http://localhost:4100
-```
-
-3. Tao RSA key pair va paste vao `.env`:
+Restart backend sau khi sua key:
 
 ```powershell
-node -e "const {generateKeyPairSync}=require('crypto'); const {privateKey, publicKey}=generateKeyPairSync('rsa',{modulusLength:2048}); console.log('JWT_PRIVATE_KEY=' + JSON.stringify(privateKey.export({type:'pkcs8',format:'pem'}))); console.log('JWT_PUBLIC_KEY=' + JSON.stringify(publicKey.export({type:'spki',format:'pem'})));"
+docker compose --profile all up -d --force-recreate backend
 ```
 
-4. Start infra + mocks + backend local:
+Chay 100 clients:
 
 ```powershell
-pnpm infra:up
-pnpm mocks:up
-pnpm db:migrate:dev
-pnpm db:seed
-pnpm dev:backend
+pnpm demo:race -- --clients=100
 ```
 
-Chay trong terminal khac:
+Co the tang toi 1000 clients:
 
 ```powershell
-pnpm demo:race
-```
-
-Tang client:
-
-```powershell
-pnpm --filter ./apps/backend exec node -r ts-node/register/transpile-only ../../scripts/demo/race-condition.ts --clients=1000
+pnpm demo:race -- --clients=1000
 ```
 
 Expected output:
@@ -143,22 +206,23 @@ Expected output:
 [race] PASS: concurrent registration did not oversell the final seat.
 ```
 
-Neu thay winners > 1 hoac dbActive > 1 la fail nghiem trong.
+Fail nghiem trong neu `winners > 1` hoac `dbActive > 1`.
 
-## 5. Demo Idempotency: 5 Lan POST Payment Cung Key
+## 6. Demo Idempotency Payment
 
-Muc tieu: chung minh double click/retry khong tao double charge.
+Muc tieu: chung minh double click/retry `POST /payments` cung
+`Idempotency-Key` khong tao double charge.
+
+Preconditions:
+
+- Backend running.
+- `mock-pg` running.
+- Stable JWT key nhu muc race condition.
 
 Chay:
 
 ```powershell
-pnpm demo:idempotency
-```
-
-Hoac:
-
-```powershell
-pnpm --filter ./apps/backend exec node -r ts-node/register/transpile-only ../../scripts/demo/idempotency.ts --attempts=5
+pnpm demo:idempotency -- --attempts=5
 ```
 
 Expected:
@@ -168,19 +232,49 @@ Expected:
 [idempotency] PASS: repeated POST /payments with one key produced one durable payment record.
 ```
 
-Neu co nhieu payment row cho cung `Idempotency-Key` la fail.
+Fail neu co nhieu payment row cho cung `Idempotency-Key` hoac response tra
+nhieu `paymentId` khac nhau.
 
-## 6. K6 Registration Load Test
+## 7. Circuit Breaker Payment
 
-Script:
+Muc tieu: chung minh payment gateway loi khong lam sap registration/web, backend
+tra loi co kiem soat va co retry/refund path.
+
+Duong demo nhanh:
+
+1. Start stack va seed.
+2. Tao workshop co phi tren Admin Web.
+3. Dang ky workshop do bang Student Web.
+4. Tat mock payment gateway:
+
+```powershell
+docker compose stop mock-pg
+```
+
+5. Thu thanh toan tren Student Web.
+
+Expected:
+
+- Backend khong crash.
+- Payment fail co thong bao ro rang.
+- Sau nhieu lan fail, circuit breaker open va fail fast.
+- Khi start lai mock-pg, gateway co the phuc hoi sau reset timeout.
+
+Start lai mock-pg:
+
+```powershell
+docker compose --profile all up -d mock-pg
+```
+
+Evidence nen chup: Student Web payment error, backend logs, `/metrics`,
+Mailhog/notifications neu co event lien quan.
+
+## 8. K6 Registration Load Test
+
+Scripts:
 
 ```text
 scripts/k6/registration-load.js
-```
-
-Script theo dung success criteria 12.000 SV / 10 phut:
-
-```text
 scripts/k6/registration-12k-10m.js
 ```
 
@@ -196,180 +290,157 @@ Neu chua co, cai theo huong dan chinh thuc cua k6 hoac dung Chocolatey:
 choco install k6
 ```
 
-### 6.1 Chuan bi workshop va token
+### 8.1 Chuan Bi 12.000 Student Tokens
 
-K6 can:
+Muc tieu success criteria:
 
-- `WORKSHOP_ID`
-- `STUDENT_TOKEN` hoac `TOKENS_FILE`
+- 12.000 request trong 10 phut dau.
+- 7.200 request trong 3 phut dau.
+- 4.800 request con lai trong 7 phut tiep theo.
+- Moi request dung token cua sinh vien khac nhau de co bang chung fairness.
 
-Cach nhanh de lay token:
+Voi demo 12K, nen cau hinh backend:
 
-1. Tao/dang nhap mot student trong Student Web.
-2. Lay token tu DevTools localStorage/session, hoac goi API login.
-
-Vi du goi API login:
-
-```powershell
-$loginBody = @{
-  email = 'student.demo1@unihub.local'
-  password = 'Test@12345'
-} | ConvertTo-Json
-
-$login = Invoke-RestMethod `
-  -Method Post `
-  -Uri http://localhost:3000/auth/login `
-  -ContentType 'application/json' `
-  -Body $loginBody
-
-$env:STUDENT_TOKEN = $login.accessToken
+```env
+RATE_LIMIT_GLOBAL_REGISTRATION_RPS=10
+RATE_LIMIT_REGQUEUE_TTL_SECONDS=1800
+RATE_LIMIT_REGQUEUE_MAX_ITEMS=200000
+JWT_ACCESS_TTL=2h
 ```
 
-Lay workshop ID:
+Restart backend:
 
 ```powershell
-$ws = Invoke-RestMethod http://localhost:3000/workshops
-$env:WORKSHOP_ID = $ws.items[0].id
+docker compose --profile all up -d --force-recreate backend
 ```
 
-### 6.2 Chay load nhe de demo tren laptop
+Tao workshop rieng cho load test, capacity >= 12.000:
 
 ```powershell
-$env:RATE = "50"
-$env:DURATION = "30s"
-k6 run scripts/k6/registration-load.js
+$env:API_BASE_URL = "http://localhost:3000"
+pnpm demo:k6:workshop -- --capacity=15000 --out=scripts/outputs/k6-12k-workshop.json
+```
+
+Copy `WORKSHOP_ID` script in ra:
+
+```powershell
+$env:WORKSHOP_ID = "paste-workshop-id-here"
+```
+
+Tao 12.000 student account + access token:
+
+```powershell
+$env:API_BASE_URL = "http://localhost:3000"
+$env:K6_TOKEN_TTL = "2h"
+pnpm demo:k6:tokens -- --count=12000 --out=scripts/outputs/k6-12k-tokens.json
+```
+
+File token duoc `open()` tu thu muc cua script k6, nen duong dan token khi chay
+k6 la:
+
+```powershell
+$env:TOKENS_FILE = "../outputs/k6-12k-tokens.json"
+```
+
+Luu y tren Windows: neu k6/Go resolve `localhost` ve IPv4 trong khi backend
+Docker bind khac ky vong, co the gap loi JWT/ket noi. Khi do dung:
+
+```powershell
+$env:API_BASE_URL = "http://[::1]:3000"
+```
+
+### 8.2 Smoke Test 10 Giay
+
+```powershell
+$env:API_BASE_URL = "http://[::1]:3000"
+$env:TOKENS_FILE = "../outputs/k6-12k-tokens.json"
+$env:BURST_RATE = "20"
+$env:BURST_DURATION = "5s"
+$env:BURST_PREALLOCATED_VUS = "20"
+$env:BURST_MAX_VUS = "80"
+$env:BURST_EXPECTED_ITERATIONS = "100"
+$env:TAIL_RATE = "10"
+$env:TAIL_TIME_UNIT = "1s"
+$env:TAIL_DURATION = "5s"
+$env:TAIL_START_TIME = "5s"
+$env:TAIL_PREALLOCATED_VUS = "10"
+$env:TAIL_MAX_VUS = "50"
+k6 run --summary-export scripts/outputs/k6-12k-smoke-summary.json scripts/k6/registration-12k-10m.js
 ```
 
 Expected:
 
-- Response duoc handle bang status `201`, `202`, `409`, `429` hoac queue full signal.
-- Khong co 5xx bat thuong.
+- `registration_handled_response` > 0.95.
+- `registration_unexpected_5xx` gan 0.
+- Response duoc handle bang `201`, `202`, `409`, `429` hoac
+  `503 registration_queue_full`.
 
-### 6.3 Chay muc cao theo success criteria
-
-Chi chay khi may du manh:
+### 8.3 Full 12.000 Request / 10 Phut
 
 ```powershell
-$env:RATE = "3000"
-$env:DURATION = "60s"
-$env:PREALLOCATED_VUS = "300"
-$env:MAX_VUS = "3000"
-k6 run scripts/k6/registration-load.js
+$env:API_BASE_URL = "http://[::1]:3000"
+$env:TOKENS_FILE = "../outputs/k6-12k-tokens.json"
+# $env:WORKSHOP_ID da set tu buoc tao workshop
+
+Remove-Item Env:BURST_RATE -ErrorAction SilentlyContinue
+Remove-Item Env:BURST_DURATION -ErrorAction SilentlyContinue
+Remove-Item Env:BURST_PREALLOCATED_VUS -ErrorAction SilentlyContinue
+Remove-Item Env:BURST_MAX_VUS -ErrorAction SilentlyContinue
+Remove-Item Env:BURST_EXPECTED_ITERATIONS -ErrorAction SilentlyContinue
+Remove-Item Env:TAIL_RATE -ErrorAction SilentlyContinue
+Remove-Item Env:TAIL_TIME_UNIT -ErrorAction SilentlyContinue
+Remove-Item Env:TAIL_DURATION -ErrorAction SilentlyContinue
+Remove-Item Env:TAIL_START_TIME -ErrorAction SilentlyContinue
+Remove-Item Env:TAIL_PREALLOCATED_VUS -ErrorAction SilentlyContinue
+Remove-Item Env:TAIL_MAX_VUS -ErrorAction SilentlyContinue
+
+k6 run --summary-export scripts/outputs/k6-12k-summary.json scripts/k6/registration-12k-10m.js
 ```
 
 Expected:
 
+- Tong HTTP requests xap xi 12.000.
+- Phase 1: 40 req/s trong 3 phut, tuong duong 7.200 request.
+- Phase 2: 80 req / 7s trong 7 phut, tuong duong 4.800 request.
 - Backend khong crash.
-- Duoi tai cao, he thong tra `202 QUEUED`, `429 rate_limited`, `409 sold_out` thay vi loi bat thuong.
-- Metrics `/metrics` co queue/payment/seat signals.
+- `registration_unexpected_5xx` thap, khong co 5xx bat ngo.
+- Khi capacity >= 12.000 va token file co 12.000 token, mot phan request
+  `201`, phan vuot nguong global RPS duoc `202 QUEUED` cong bang theo token.
 
-### 6.4 Chay dung kich ban 12.000 sinh vien / 10 phut
+## 9. Offline Check-in Demo
 
-Yeu cau de bai:
-
-- 12.000 luot truy cap/dang ky trong 10 phut dau.
-- 60% don vao 3 phut dau: 7.200 request / 180s = 40 request/giay.
-- 40% con lai trong 7 phut sau: 4.800 request / 420s = 80 request / 7 giay.
-
-Script:
-
-```powershell
-pnpm demo:k6:12k
-```
-
-Hoac:
-
-```powershell
-k6 run scripts/k6/registration-12k-10m.js
-```
-
-Bien moi truong bat buoc:
-
-```powershell
-$env:WORKSHOP_ID = "<published-workshop-id>"
-$env:TOKENS_FILE = ".\tokens.json"
-```
-
-Co the dung `STUDENT_TOKEN` de test qua tai API nhanh, nhung khi chi dung 1
-token thi do la nhieu request tu cung 1 sinh vien, khong phai bang chung cong
-bang giua nhieu sinh vien. De chung minh cong bang, nen dung `TOKENS_FILE` gom
-nhieu access token cua cac student khac nhau:
-
-```json
-[
-  "access-token-student-1",
-  "access-token-student-2",
-  "access-token-student-3"
-]
-```
-
-Kich ban k6 se xoay vong token theo virtual user va iteration:
-
-```text
-token = tokens[(__ITER + __VU) % tokens.length]
-```
-
-Moi request co `Idempotency-Key` rieng:
-
-```text
-k6-12k-<VU>-<ITER>-<timestamp>
-```
-
-Expected:
-
-- Tong request xap xi 12.000.
-- 3 phut dau co khoang 7.200 request.
-- 7 phut sau co khoang 4.800 request.
-- Cac response duoc xem la he thong xu ly co kiem soat: `201`, `202`, `409`, `429`, hoac `503 registration_queue_full`.
-- `202 QUEUED` chung minh backend bao ve luong dang ky bang queue khi qua tai cuc bo.
-- `429 rate_limited` chung minh client spam lien tuc bi chan.
-- `409 sold_out/already_registered` la conflict nghiep vu hop le, khong phai crash.
-- Khong co nhieu loi 5xx bat thuong.
-
-Lenh lay evidence sau khi chay:
-
-```powershell
-Invoke-WebRequest http://localhost:3000/metrics -UseBasicParsing
-docker compose --profile all exec postgres psql -U unihub -d unihub -c "select status, count(*) from registrations group by status;"
-```
-
-## 7. Offline Check-in Demo Script
-
-Tai lieu kich ban:
+Runbook chi tiet:
 
 ```text
 scripts/demo/offline-checkin.md
-```
-
-Doc them huong dan chi tiet Expo:
-
-```text
 docs/TESTING_MOBILE_EXPO.md
 ```
 
 Tom tat:
 
-1. Start stack.
-2. Tao student registration confirmed va QR.
+1. Start stack va seed.
+2. Tao student registration `CONFIRMED` va mo QR.
 3. Start Expo app.
 4. Login staff.
 5. Tat mang.
-6. Scan QR.
-7. Bat mang.
-8. App sync queue len backend.
+6. Scan QR, item vao SQLite queue.
+7. Bat mang lai.
+8. NetInfo auto-sync queue len `POST /checkin/batch`.
 
 Expected:
 
-- Offline scan vao SQLite queue.
-- Online lai sync accepted.
-- Duplicate scan khong tao row thu hai.
+- Offline scan verify duoc QR bang JWKS da cache.
+- Queue ben vung qua app restart.
+- Sync online tao dung 1 row `checkins`.
+- Scan trung khong tao row thu hai.
 
-## 8. Metrics Va Evidence Cho Bao Cao
+## 10. Evidence Cho Bao Cao Va Video
 
 Sau khi chay demo, lay evidence:
 
 ```powershell
 Invoke-WebRequest http://localhost:3000/metrics -UseBasicParsing
+docker compose --profile all ps
 ```
 
 Kiem tra DB nhanh:
@@ -381,35 +452,38 @@ docker compose --profile all exec postgres psql -U unihub -d unihub -c "select s
 docker compose --profile all exec postgres psql -U unihub -d unihub -c "select count(*) from checkins;"
 ```
 
-Nen chup man hinh:
+Nen chup/quay:
 
-- Student Web registration + QR.
-- Admin Web workshop + AI summary.
-- Admin Web import jobs.
-- Mailhog email.
-- Mobile offline queue.
-- Terminal `PASS` cua race/idempotency.
-- K6 summary.
-- Docker `ps` full stack healthy.
+- `pnpm build`, `pnpm lint`, `pnpm test` thanh cong.
+- Docker full stack healthy.
+- Student Web: list/detail/register/payment/QR.
+- Admin Web: CRUD/publish workshop, AI summary, CSV import jobs,
+  registrations/check-ins/staff assignments.
+- Mailhog email/notification.
+- Mobile: offline queue va sync lai.
+- Terminal PASS cua race/idempotency.
+- K6 summary va file `scripts/outputs/k6-12k-summary.json`.
+- `/metrics` co Prometheus metrics.
 
-## 9. Checklist Theo Yeu Cau De Bai
+## 11. Checklist Theo Yeu Cau De Bai
 
-| Tieu chi | Bang chung |
+| Tieu chi | Bang chung nen dung |
 | --- | --- |
-| Co thiet ke blueprint | `blueprint/design.md`, specs, Prisma schema |
+| Source chay duoc | `src/README.md`, `docs/TESTING_WEB_API.md`, Docker stack healthy |
+| Seed/sample data | `pnpm db:seed`, `apps/backend/src/seed/seed.ts`, scripts tao PDF/CSV/token |
 | Auth/RBAC | login admin/organizer/student/staff, route guards |
 | Workshop catalog | Student Web + Admin Web CRUD/publish |
-| Registration race condition | `pnpm demo:race` |
-| Idempotency | `pnpm demo:idempotency` |
-| Payment + circuit breaker | paid registration + mock-pg health/failure |
+| Registration concurrency | `pnpm demo:race -- --clients=100` |
+| Idempotency | `pnpm demo:idempotency -- --attempts=5` |
+| Payment + circuit breaker | paid registration + stop/start `mock-pg` |
 | Notification | Mailhog + `/notifications/me` |
-| Check-in offline | Expo app + `scripts/demo/offline-checkin.md` |
-| AI summary | `scripts/smoke-ai-summary.ps1` |
+| Check-in offline | Expo app + SQLite queue + `scripts/demo/offline-checkin.md` |
+| AI summary | `scripts/smoke-ai-summary.ps1` + Gemini `READY` + cache hit |
 | CSV sync | `scripts/smoke-csv-sync.ps1` |
 | Observability | `/health`, `/metrics`, Docker healthchecks |
-| Deployability | `docker compose --profile all up -d --build` |
+| Video demo | Quay app/code dang chay, terminal test PASS, camera thanh vien |
 
-## 10. Cleanup
+## 12. Cleanup
 
 Stop nhung giu data:
 
@@ -417,8 +491,12 @@ Stop nhung giu data:
 docker compose --profile all down
 ```
 
-Stop va xoa data:
+Stop va xoa Docker named/anonymous volumes:
 
 ```powershell
 pnpm stack:down
 ```
+
+Luu y: compose hien mount bind vao `src/data/*`, nen `down -v` khong dam bao
+xoa sach cac file runtime trong thu muc nay. Neu can reset DB tuyet doi, dung
+mot ban sao/thu muc data moi hoac don `src/data` sau khi da backup bang chung.

@@ -8,7 +8,7 @@ thu cong, va khi nao ban can tao file `.env`.
 Neu test theo runbook Docker:
 
 ```powershell
-cd d:\HCMUS\Nam_3\HK2\TKPM\Project\UniHubWorkshop\src
+cd <repo>\src
 pnpm stack:up
 ```
 
@@ -20,19 +20,21 @@ dev values bang cu phap `${VAR:-default}` cho tat ca service local:
 - RabbitMQ: user/password/port/UI port
 - MinIO: access key/secret/bucket/ports
 - Mailhog: SMTP/UI ports
-- Backend: connection strings, JWT TTL, bootstrap admin, SMTP, payment, AI, CSV
+- Backend: connection strings, JWT TTL, bootstrap admin, SMTP, payment, Gemini AI, CSV
 - Mock payment gateway: webhook URL/secret
-- Mock AI service: port
 - Student Web/Admin Web: API proxy den backend
 
-Voi cach nay, Mailhog thay SMTP that, mock-pg thay payment gateway that, va
-mock-ai thay AI provider that. Do do khong can API key ben ngoai nao cho demo.
+Voi cach nay, Mailhog thay SMTP that va mock-pg thay payment gateway that.
+Tinh nang AI summary dung Gemini API, nen can cau hinh `GEMINI_API_KEY` neu
+muon test upload PDF -> summary. `services/mock-ai` chi con la legacy service,
+khong duoc backend goi trong code hien tai.
 
-Neu muon nhin ro hoac tuy bien port/password, copy root env example:
+Neu muon nhin ro hoac tuy bien port/password, copy root env example. Day cung
+la noi dat `GEMINI_API_KEY` khi chay Docker Compose:
 
 ```powershell
-cd d:\HCMUS\Nam_3\HK2\TKPM\Project\UniHubWorkshop\src
-Copy-Item .env.example .env
+cd <repo>\src
+if (!(Test-Path .env)) { Copy-Item .env.example .env }
 ```
 
 Docker Compose tu dong doc file `src/.env` neu file nay ton tai.
@@ -53,7 +55,8 @@ Docker Compose tu dong doc file `src/.env` neu file nay ton tai.
 | `SMTP_HOST` | `mailhog` | Email gui vao Mailhog, khong gui ra internet |
 | `SMTP_PORT` | `1025` | Mailhog SMTP |
 | `MOCK_PG_URL` | `http://mock-pg:4000` | Payment gateway local |
-| `MOCK_AI_URL` | `http://mock-ai:4100` | AI service local |
+| `GEMINI_API_KEY` | empty | Google Gemini API key cho AI summary |
+| `GEMINI_MODEL` | `gemini-2.5-flash` | Model AI summary |
 | `MOCK_PG_WEBHOOK_SECRET` | `mock-pg-secret` | HMAC webhook secret |
 | `BOOTSTRAP_ADMIN_EMAIL` | `admin@unihub.local` | Admin seed |
 | `BOOTSTRAP_ADMIN_PASSWORD` | `Admin@123456` | Admin seed |
@@ -70,8 +73,8 @@ src/apps/backend/.env
 Co the tao tu example:
 
 ```powershell
-cd d:\HCMUS\Nam_3\HK2\TKPM\Project\UniHubWorkshop\src\apps\backend
-Copy-Item .env.example .env
+cd <repo>\src\apps\backend
+if (!(Test-Path .env)) { Copy-Item .env.example .env }
 ```
 
 Gia tri local khac Docker o hostname: dung `localhost` thay vi ten service
@@ -98,16 +101,16 @@ SMTP_FROM=UniHub <no-reply@unihub.local>
 
 MOCK_PG_URL=http://localhost:4000
 MOCK_PG_WEBHOOK_SECRET=mock-pg-secret
-MOCK_AI_URL=http://localhost:4100
+GEMINI_API_KEY=<your-google-ai-studio-key>
+GEMINI_MODEL=gemini-2.5-flash
 ```
 
 Lenh chay infra-only:
 
 ```powershell
-cd d:\HCMUS\Nam_3\HK2\TKPM\Project\UniHubWorkshop\src
+cd <repo>\src
 docker compose up -d postgres redis rabbitmq minio mailhog
 pnpm --filter @unihub/mock-pg dev
-pnpm --filter @unihub/mock-ai dev
 pnpm --filter @unihub/backend dev
 ```
 
@@ -120,7 +123,7 @@ Khi can demo offline QR lau hon mot lan restart, hoac can demo script tu sign
 JWT, nen dung keypair co dinh:
 
 ```powershell
-node -e "const {generateKeyPairSync}=require('crypto'); const {privateKey,publicKey}=generateKeyPairSync('rsa',{modulusLength:2048}); console.log('JWT_PRIVATE_KEY='+JSON.stringify(privateKey.export({type:'pkcs1',format:'pem'}))); console.log('JWT_PUBLIC_KEY='+JSON.stringify(publicKey.export({type:'pkcs1',format:'pem'})));"
+node -e "const {generateKeyPairSync}=require('crypto'); const {privateKey, publicKey}=generateKeyPairSync('rsa',{modulusLength:2048,publicKeyEncoding:{type:'spki',format:'pem'},privateKeyEncoding:{type:'pkcs8',format:'pem'}}); console.log('JWT_PRIVATE_KEY=' + JSON.stringify(privateKey)); console.log('JWT_PUBLIC_KEY=' + JSON.stringify(publicKey));"
 ```
 
 Copy 2 dong output vao file `.env` phu hop.

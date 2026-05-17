@@ -94,7 +94,7 @@ khac cua he thong nam o `docs/ENVIRONMENT.md`.
 Tu thu muc `src`:
 
 ```powershell
-cd d:\HCMUS\Nam_3\HK2\TKPM\Project\UniHubWorkshop\src
+cd <repo>\src
 pnpm stack:up
 docker compose --profile all exec backend pnpm run seed
 ```
@@ -147,7 +147,7 @@ Can co mot sinh vien da `CONFIRMED` registration.
 Tu thu muc mobile app:
 
 ```powershell
-cd d:\HCMUS\Nam_3\HK2\TKPM\Project\UniHubWorkshop\src\apps\mobile
+cd <repo>\src\apps\mobile
 npx expo start
 ```
 
