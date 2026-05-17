@@ -1,11 +1,14 @@
 import http from 'k6/http';
 import { check, sleep } from 'k6';
+import crypto from 'k6/crypto';
+import exec from 'k6/execution';
 import { Counter, Rate } from 'k6/metrics';
 
 const apiBaseUrl = __ENV.API_BASE_URL || 'http://localhost:3000';
 const workshopId = __ENV.WORKSHOP_ID;
 const singleToken = __ENV.STUDENT_TOKEN;
 const tokensFile = __ENV.TOKENS_FILE;
+const burstExpectedIterations = Number(__ENV.BURST_EXPECTED_ITERATIONS || 7200);
 
 let tokenPool = [];
 if (tokensFile) {
@@ -60,18 +63,27 @@ export function setup() {
       'Only one STUDENT_TOKEN was provided. This tests API overload protection, but not fairness between different students. Use TOKENS_FILE for fairness evidence.',
     );
   }
+  if (tokenPool.length < 12000) {
+    console.warn(`TOKENS_FILE has ${tokenPool.length} tokens. Use 12000 tokens for the 12K fairness demo.`);
+  }
   return { tokens: tokenPool };
 }
 
 export function register(data) {
-  const token = data.tokens[(__ITER + __VU) % data.tokens.length];
+  const tokenIndex = tokenIndexForCurrentIteration(data.tokens.length);
+  const token = data.tokens[tokenIndex];
+  if (__ENV.DEBUG_REGISTRATION === '1' && __ITER < 2) {
+    console.error(
+      `token index=${tokenIndex} length=${String(token).length} sha256=${crypto.sha256(String(token), 'hex')} prefix=${String(token).slice(0, 24)} suffix=${String(token).slice(-24)}`,
+    );
+  }
   const idempotencyKey = `k6-12k-${__VU}-${__ITER}-${Date.now()}`;
   const response = http.post(
     `${apiBaseUrl}/registrations`,
     JSON.stringify({ workshopId }),
     {
       headers: {
-        Authorization: `Bearer ${token}`,
+        authorization: `Bearer ${token}`,
         'Content-Type': 'application/json',
         'Idempotency-Key': idempotencyKey,
       },
@@ -82,6 +94,9 @@ export function register(data) {
   recordStatus(response);
 
   const handled = isHandledRegistrationResponse(response);
+  if (!handled && __ENV.DEBUG_REGISTRATION === '1') {
+    console.error(`unhandled registration response: status=${response.status} body=${String(response.body || '').slice(0, 500)}`);
+  }
   handledResponses.add(handled);
   if (response.status >= 500 && !isQueueFull(response)) {
     unexpectedServerErrors.add(1);
@@ -93,6 +108,12 @@ export function register(data) {
   });
 
   sleep(0.01);
+}
+
+function tokenIndexForCurrentIteration(tokenCount) {
+  const iteration = exec.scenario.iterationInTest;
+  const offset = exec.scenario.name === 'remaining_7_minutes' ? burstExpectedIterations : 0;
+  return (offset + iteration) % tokenCount;
 }
 
 function recordStatus(response) {
