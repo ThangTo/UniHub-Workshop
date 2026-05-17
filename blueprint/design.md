@@ -54,7 +54,7 @@ Hệ thống được thiết kế theo **Modular Monolith** ở backend, kết 
 | **Redis**                | Mất rate limit + atomic seat counter + idempotency | Fallback: rate limit chuyển sang in-memory; seat allocation về full DB lock; idempotency key đi DB |
 | **RabbitMQ**             | Event không phát đi                                | Notification & AI Summary delay; backend ghi outbox table → retry khi MQ phục hồi                  |
 | **Mock Payment Gateway** | Không thanh toán được                              | **Circuit Breaker mở**, **Graceful Degradation**: catalog/đăng ký free/check-in/AI/CSV vẫn chạy    |
-| **Gemini AI API**        | Summary không tạo được do thiếu key/quota/network  | Worker retry với backoff; trang chi tiết vẫn hiển thị description gốc nếu summary `FAILED`          |
+| **Gemini AI API**        | Summary không tạo được do thiếu key/quota/network  | Worker retry với backoff; trang chi tiết vẫn hiển thị description gốc nếu summary `FAILED`         |
 | **Mobile mất mạng**      | Không gọi được API                                 | Lưu local SQLite, sync khi có mạng                                                                 |
 
 ---
@@ -107,39 +107,6 @@ Hệ thống được thiết kế theo **Modular Monolith** ở backend, kết 
 
 > Rendered PNG with white background. Local fallback: `assets/diagrams-png/design-04-3-2-luong-check-in-offline-chi-tiet.png`. Mermaid source below is kept for editing.
 
-```mermaid
-sequenceDiagram
-    autonumber
-    participant Staff as Nhân sự check-in
-    participant App as Mobile App
-    participant SQLite as SQLite local
-    participant API as Backend API
-    participant DB as PostgreSQL
-
-    Note over Staff,App: TÌNH HUỐNG MẤT MẠNG
-    Staff->>App: Quét QR (regId, signature)
-    App->>App: Verify signature offline (public key cached)
-    App->>SQLite: INSERT INTO checkin_queue<br/>(regId, scannedAt, deviceId, idempKey)
-    App-->>Staff: ✓ Đã ghi nhận (offline)
-
-    Note over Staff,App: Nhiều SV khác cũng check-in offline
-    loop n lần
-        Staff->>App: Quét QR
-        App->>SQLite: INSERT
-    end
-
-    Note over App,API: KHI CÓ MẠNG TRỞ LẠI
-    App->>SQLite: SELECT * WHERE synced=false
-    App->>API: POST /checkin/batch<br/>{items: [{qrToken, scannedAt, deviceId, idempotencyKey}]}
-    API->>DB: BEGIN TRANSACTION
-    loop từng item
-        API->>DB: INSERT INTO checkins ON CONFLICT (idempKey) DO NOTHING
-    end
-    API->>DB: COMMIT
-    API-->>App: {accepted, duplicates, invalid}
-    App->>SQLite: UPDATE synced=true cho accepted+duplicates
-```
-
 **Bảo đảm**:
 
 - `idempKey = sha256(regId + deviceId + scannedAt_ms)` → cùng 1 lần quét gửi nhiều lần vẫn chỉ tạo 1 bản ghi.
@@ -154,16 +121,16 @@ sequenceDiagram
 
 Hệ thống dùng **kết hợp PostgreSQL (primary) + Redis (cache/atomic store) + MinIO (blob storage)**.
 
-| Loại dữ liệu                                         | Đặc điểm                                                                                                            | Lựa chọn                                    | Lý do                                                                             |
-| ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- | ------------------------------------------- | --------------------------------------------------------------------------------- |
-| Users, Workshops, Registrations, Payments, Check-ins | Quan hệ chặt, transaction ACID, query phức tạp (JOIN, aggregate cho thống kê), constraint nghiêm ngặt (unique seat) | **PostgreSQL**                              | Tính nhất quán cao, transaction đa bảng, partial index, JSONB cho field linh hoạt |
-| Seat counter (số chỗ còn lại real-time)              | Giảm/cộng atomic, tốc độ rất cao, không cần persistent dài                                                          | **Redis** (`DECR`/`INCR`)                   | Atomic ops single-threaded, tránh race; rebuild được từ PostgreSQL                |
-| Rate limit counter                                   | Đếm token bucket/sliding window, TTL ngắn                                                                           | **Redis**                                   | Lua atomic + TTL native                                                           |
-| Idempotency Key                                      | Lookup theo key, TTL 24h, cần durable fallback cho payment/registration/check-in                                    | **Redis + PostgreSQL**                      | Redis nhanh; bảng `idempotency_keys` chống trùng dài hạn và dùng khi Redis down   |
-| Session blacklist (JWT revoke)                       | Lookup boolean, TTL = JWT exp                                                                                       | **Redis**                                   | Như trên                                                                          |
-| Workshop catalog cache                               | Đọc nhiều, ghi ít, cần invalidate khi admin sửa                                                                     | **Redis** (read-through, TTL 5 phút)        | Giảm tải DB khi 12K SV cùng load catalog                                          |
-| File PDF                                             | Blob, lớn, ít cập nhật                                                                                              | **MinIO (S3 API)**                          | DB không nên lưu blob; CDN-ready; QR image hiện trả dạng `qrImageDataUrl`         |
-| Audit log, AI summary cache                          | Append-only, đọc theo thời gian                                                                                     | **PostgreSQL**                              | Schema hiện tại dùng bảng thường; có thể partition sau nếu dữ liệu lớn            |
+| Loại dữ liệu                                         | Đặc điểm                                                                                                            | Lựa chọn                             | Lý do                                                                             |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- | ------------------------------------ | --------------------------------------------------------------------------------- |
+| Users, Workshops, Registrations, Payments, Check-ins | Quan hệ chặt, transaction ACID, query phức tạp (JOIN, aggregate cho thống kê), constraint nghiêm ngặt (unique seat) | **PostgreSQL**                       | Tính nhất quán cao, transaction đa bảng, partial index, JSONB cho field linh hoạt |
+| Seat counter (số chỗ còn lại real-time)              | Giảm/cộng atomic, tốc độ rất cao, không cần persistent dài                                                          | **Redis** (`DECR`/`INCR`)            | Atomic ops single-threaded, tránh race; rebuild được từ PostgreSQL                |
+| Rate limit counter                                   | Đếm token bucket/sliding window, TTL ngắn                                                                           | **Redis**                            | Lua atomic + TTL native                                                           |
+| Idempotency Key                                      | Lookup theo key, TTL 24h, cần durable fallback cho payment/registration/check-in                                    | **Redis + PostgreSQL**               | Redis nhanh; bảng `idempotency_keys` chống trùng dài hạn và dùng khi Redis down   |
+| Session blacklist (JWT revoke)                       | Lookup boolean, TTL = JWT exp                                                                                       | **Redis**                            | Như trên                                                                          |
+| Workshop catalog cache                               | Đọc nhiều, ghi ít, cần invalidate khi admin sửa                                                                     | **Redis** (read-through, TTL 5 phút) | Giảm tải DB khi 12K SV cùng load catalog                                          |
+| File PDF                                             | Blob, lớn, ít cập nhật                                                                                              | **MinIO (S3 API)**                   | DB không nên lưu blob; CDN-ready; QR image hiện trả dạng `qrImageDataUrl`         |
+| Audit log, AI summary cache                          | Append-only, đọc theo thời gian                                                                                     | **PostgreSQL**                       | Schema hiện tại dùng bảng thường; có thể partition sau nếu dữ liệu lớn            |
 
 ### 4.2 Schema PostgreSQL — Các entity quan trọng
 
@@ -511,80 +478,6 @@ erDiagram
 
 > Rendered PNG with white background. Local fallback: `assets/diagrams-png/design-06-5-1-luong-ang-ky-workshop-co-phi-paid-confirmed.png`. Mermaid source below is kept for editing.
 
-```mermaid
-sequenceDiagram
-    autonumber
-    participant SV as Sinh viên
-    participant FE as Student Web
-    participant RL as Rate Limiter
-    participant API as Backend API
-    participant R as Redis
-    participant DB as PostgreSQL
-    participant CB as Circuit Breaker
-    participant PG as Mock Payment GW
-    participant MQ as RabbitMQ
-    participant W as Notification Worker
-
-    SV->>FE: Bấm "Đăng ký" workshop W (phí 200K)
-    FE->>API: POST /registrations {workshopId} + JWT
-    API->>RL: check token bucket (user + IP)
-    alt vượt ngưỡng
-        RL-->>API: deny
-        API-->>FE: 429 Too Many Requests (Retry-After)
-    end
-    API->>R: Lua allocateSeat(W, studentId, requestId, ttl=15m)
-    alt không còn ghế
-        API-->>FE: 409 Workshop đã hết chỗ
-    end
-    API->>DB: BEGIN TX
-    API->>API: Kiểm tra payment health<br/>(Closed/Half-Open: 15m, Open: 5m)
-    API->>DB: INSERT registration (PENDING_PAYMENT, hold_expires_at=now+holdTtl)
-    API->>DB: INSERT outbox_event registration.hold_created
-    API->>DB: COMMIT
-    API->>R: ATTACH hold:W:SV với regId
-    API-->>FE: 201 {regId, paymentRequired:true, holdExpiresAt, paymentUnavailable?:true}
-
-    FE->>SV: Hiển thị form thanh toán
-    SV->>FE: Xác nhận thanh toán
-    FE->>API: POST /payments<br/>Header: Idempotency-Key=uuid<br/>{registrationId, method}
-    API->>R: GET idem:payments:{key}
-    alt key tồn tại
-        API-->>FE: trả response_snapshot cũ (KHÔNG gọi PG lần 2)
-    end
-    API->>DB: INSERT idempotency_keys (key, endpoint='/payments', completed=false)
-    API->>DB: INSERT payment attempt (INITIATED, attempt_no=N, idem_key, request_hash)
-    API->>CB: callPaymentGateway()
-    alt CB OPEN
-        CB-->>API: throw CircuitOpenError
-        API->>DB: UPDATE payment FAILED
-        API->>DB: UPDATE idempotency_keys completed=true, snapshot
-        API->>R: SET idem:payments:{key}=snapshot(503)
-        API-->>FE: 503 payment_unavailable
-    else CB CLOSED hoặc HALF_OPEN
-        CB->>PG: POST /charge (timeout 3s)
-        alt thành công
-            PG-->>CB: {txnId, status:SUCCESS}
-            API->>DB: BEGIN TX
-            API->>DB: UPDATE payment SUCCESS
-            API->>DB: UPDATE registration CONFIRMED, qr_token=...
-            API->>DB: INSERT outbox_event registration.confirmed
-            API->>DB: COMMIT
-            API->>R: SET idem:payments:{key}=snapshot(201,{qrToken})
-            API->>R: DEL hold:W:SV
-            API-->>FE: 201 {status:"success", paymentId, qrToken, qrImageDataUrl}
-        else PG timeout / 5xx
-            CB->>CB: ghi nhận failure
-            API->>DB: UPDATE payment TIMEOUT
-            API->>R: SET idem:payments:{key}=snapshot(202,pending_reconcile)
-            API-->>FE: 202 {status:"pending", paymentId}
-        end
-    end
-
-    Note over MQ,W: Outbox Relay đẩy event sau khi commit
-    MQ->>W: registration.confirmed
-    W->>W: Render template + gửi email + tạo in-app notification
-```
-
 **Bảo đảm chính**:
 
 - **Không trùng ghế**: Lua `allocateSeat` tạo hold Redis cùng lúc với decrement + DB unique `(workshop_id, student_id)`.
@@ -611,47 +504,6 @@ sequenceDiagram
 ![5.3 Luồng nhập dữ liệu CSV đêm](https://i.ibb.co/TBHRrt9X/design-07-5-3-luong-nhap-du-lieu-csv-em.png)
 
 > Rendered PNG with white background. Local fallback: `assets/diagrams-png/design-07-5-3-luong-nhap-du-lieu-csv-em.png`. Mermaid source below is kept for editing.
-
-```mermaid
-sequenceDiagram
-    autonumber
-    participant Cron as Cron 02:00
-    participant W as CSV Worker
-    participant FS as data/csv-drop
-    participant DB as PostgreSQL
-    participant Q as data/csv-quarantine
-
-    Cron->>W: trigger
-    W->>FS: list *.csv
-    loop từng file
-        W->>W: tính SHA-256
-        W->>DB: SELECT FROM import_jobs WHERE file_sha256=?
-        alt đã import
-            W->>W: skip
-        else chưa
-            W->>DB: INSERT import_jobs RUNNING
-            W->>W: parse + validate header
-            alt header sai
-                W->>Q: move file
-                W->>DB: UPDATE FAILED
-            else
-                loop từng dòng
-                    alt dòng hợp lệ
-                        W->>DB: INSERT INTO students_staging
-                    else
-                        W->>W: ghi vào error_log
-                    end
-                end
-                W->>DB: BEGIN
-                W->>DB: UPSERT students FROM staging
-                W->>DB: DELETE staging rows theo import_job_id
-                W->>DB: COMMIT
-                W->>DB: UPDATE SUCCESS/PARTIAL
-                W->>FS: archive file
-            end
-        end
-    end
-```
 
 **Chống lỗi**:
 
@@ -763,13 +615,13 @@ export class WorkshopController {
 
 **Cấu hình các bucket**:
 
-| Phạm vi                                        | Capacity     | Refill rate       | Hành vi vượt                     |
-| ---------------------------------------------- | ------------ | ----------------- | -------------------------------- |
-| Per-IP (toàn site)                             | 60 tokens    | 30 token/phút     | 429 + `Retry-After`              |
-| Per-user authenticated (toàn site)             | 120 tokens   | 60 token/phút     | 429                              |
-| Per-user trên `POST /registrations`            | 10 tokens    | 1 token/giây      | 429 — chống auto-click           |
-| Per-user trên `POST /payments`                 | 5 tokens     | 30 token/phút     | 429                              |
-| Global cho `POST /registrations` (system-wide) | 500 req/giây | (Sliding Window)  | `202 Accepted` + queue FIFO ngắn |
+| Phạm vi                                        | Capacity     | Refill rate      | Hành vi vượt                     |
+| ---------------------------------------------- | ------------ | ---------------- | -------------------------------- |
+| Per-IP (toàn site)                             | 60 tokens    | 30 token/phút    | 429 + `Retry-After`              |
+| Per-user authenticated (toàn site)             | 120 tokens   | 60 token/phút    | 429                              |
+| Per-user trên `POST /registrations`            | 10 tokens    | 1 token/giây     | 429 — chống auto-click           |
+| Per-user trên `POST /payments`                 | 5 tokens     | 30 token/phút    | 429                              |
+| Global cho `POST /registrations` (system-wide) | 500 req/giây | (Sliding Window) | `202 Accepted` + queue FIFO ngắn |
 
 **Cài đặt** (Redis Lua script atomic):
 
@@ -807,15 +659,6 @@ return { allowed and 1 or 0, tokens }
 ![7.2 Xử lý cổng thanh toán không ổn định — Circuit Breaker + Graceful Degradation](https://i.ibb.co/hJX6qfk7/design-08-7-2-xu-ly-cong-thanh-toan-khong-on-inh-circuit-breaker-graceful-degradation.png)
 
 > Rendered PNG with white background. Local fallback: `assets/diagrams-png/design-08-7-2-xu-ly-cong-thanh-toan-khong-on-inh-circuit-breaker-graceful-degradation.png`. Mermaid source below is kept for editing.
-
-```mermaid
-stateDiagram-v2
-    [*] --> Closed
-    Closed --> Open : failureRate ≥ 50% trong 20 req gần nhất<br/>HOẶC ≥ 10 timeout liên tiếp
-    Open --> HalfOpen : sau 30s (resetTimeout)
-    HalfOpen --> Closed : 3 request thử thành công liên tiếp
-    HalfOpen --> Open : 1 request thất bại
-```
 
 **Cấu hình** (`opossum`):
 
@@ -888,19 +731,6 @@ nhận request → đọc Redis idem:{endpoint}:{key}
 ![7.3 Chống trừ tiền 2 lần — Idempotency Key](https://i.ibb.co/3Y1RtpZ9/design-09-7-3-chong-tru-tien-2-lan-idempotency-key.png)
 
 > Rendered PNG with white background. Local fallback: `assets/diagrams-png/design-09-7-3-chong-tru-tien-2-lan-idempotency-key.png`. Mermaid source below is kept for editing.
-
-```mermaid
-flowchart TD
-    A[POST /payments<br/>Idempotency-Key=K] --> B{Redis idem:payments:K tồn tại?}
-    B -- Có --> C{request_hash khớp?}
-    C -- Khớp --> D[Trả snapshot cũ<br/>không gọi gateway]
-    C -- Khác --> E[422 idempotency_key_reused]
-    B -- Không --> F[INSERT idempotency_keys<br/>PRIMARY KEY key+endpoint]
-    F -- Conflict --> G[Đợi 100ms, đọc lại Redis] --> D
-    F -- OK --> H[Gọi gateway qua Circuit Breaker]
-    H --> I[Ghi snapshot vào DB + Redis TTL 24h]
-    I --> J[Trả response]
-```
 
 **Thời gian hết hạn (TTL)**:
 
