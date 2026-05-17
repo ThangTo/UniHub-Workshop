@@ -8,8 +8,8 @@ import { AiSummaryWorker } from './ai-summary.worker';
  * AiSummaryModule — Phase 4 (specs/ai-summary.md):
  *   - Controller: upload PDF + retry + status.
  *   - Service:   validate, hash, MinIO put, outbox event.
- *   - Worker:    consume `workshop.pdf.uploaded` → mock-ai → DB update.
- *   - Client:    HTTP + retry/backoff cho mock-ai.
+ *   - Worker:    consume `workshop.pdf.uploaded` → Gemini API → DB update.
+ *   - Client:    HTTP + retry/backoff cho Gemini.
  *
  * Phụ thuộc MinioModule (global) + OutboxModule + AmqpModule (đã global hoá).
  */

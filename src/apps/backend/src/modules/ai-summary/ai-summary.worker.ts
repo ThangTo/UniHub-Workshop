@@ -30,7 +30,7 @@ const MAX_TEXT_CHARS = 50_000;
 /**
  * AI Summary Worker (specs/ai-summary.md §Luồng chính step 5–10).
  *
- *   pdf.uploaded → fetch MinIO → pdf-parse → clean text → mock-ai
+ *   pdf.uploaded → fetch MinIO → pdf-parse → clean text → Gemini API
  *     ↳ success: UPSERT ai_summary_cache + UPDATE workshop READY
  *     ↳ fail   : UPDATE workshop FAILED + reason
  *
