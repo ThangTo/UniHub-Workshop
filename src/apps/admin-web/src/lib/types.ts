@@ -50,6 +50,25 @@ export interface CreateWorkshopInput {
   roomId?: string | null;
 }
 
+export interface SpeakerOption {
+  id: string;
+  name: string;
+  title?: string | null;
+}
+
+export interface RoomOption {
+  id: string;
+  code: string;
+  name: string;
+  capacity: number;
+  mapUrl?: string | null;
+}
+
+export interface WorkshopFormOptions {
+  speakers: SpeakerOption[];
+  rooms: RoomOption[];
+}
+
 export type ImportJobStatus = 'RUNNING' | 'SUCCESS' | 'PARTIAL' | 'FAILED';
 
 export interface ImportJob {
@@ -87,6 +106,16 @@ export interface StaffAssignment {
   };
   startsAt: string;
   endsAt: string;
+}
+
+export interface AdminUser {
+  id: string;
+  email: string;
+  fullName: string;
+  studentCode?: string | null;
+  isActive: boolean;
+  roles: RoleName[];
+  createdAt: string;
 }
 
 export interface AdminRegistration {

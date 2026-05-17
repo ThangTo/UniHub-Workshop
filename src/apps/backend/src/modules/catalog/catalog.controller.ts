@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Headers,
   Param,
@@ -73,6 +74,18 @@ export class CatalogController {
   }
 
   @Roles('ORGANIZER', 'SYS_ADMIN')
+  @Get('admin/options')
+  async adminOptions() {
+    return this.catalog.adminOptions();
+  }
+
+  @Roles('ORGANIZER', 'SYS_ADMIN')
+  @Get('options/form')
+  async formOptions() {
+    return this.catalog.adminOptions();
+  }
+
+  @Roles('ORGANIZER', 'SYS_ADMIN')
   @Get('admin/:id')
   async adminDetail(
     @Param('id', ParseUUIDPipe) id: string,
@@ -122,5 +135,14 @@ export class CatalogController {
     @Body('reason') reason?: string,
   ) {
     return this.catalog.cancel(id, reason ?? 'No reason provided', user);
+  }
+
+  @Roles('ORGANIZER', 'SYS_ADMIN')
+  @Delete(':id')
+  async deletePermanent(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.catalog.deletePermanent(id, user);
   }
 }

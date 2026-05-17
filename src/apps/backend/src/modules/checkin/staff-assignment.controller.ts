@@ -29,6 +29,35 @@ export class StaffAssignmentController {
   ) {}
 
   @Roles('ORGANIZER', 'SYS_ADMIN')
+  @Get('staff-options')
+  async staffOptions() {
+    const users = await this.prisma.user.findMany({
+      where: {
+        isActive: true,
+        roles: {
+          some: {
+            role: { name: 'CHECKIN_STAFF' },
+          },
+        },
+      },
+      orderBy: { fullName: 'asc' },
+      include: { roles: { include: { role: true } } },
+    });
+
+    return {
+      items: users.map((user) => ({
+        id: user.id,
+        email: user.email,
+        fullName: user.fullName,
+        studentCode: user.studentCode,
+        isActive: user.isActive,
+        roles: user.roles.map((userRole) => userRole.role.name),
+        createdAt: user.createdAt,
+      })),
+    };
+  }
+
+  @Roles('ORGANIZER', 'SYS_ADMIN')
   @Post()
   @HttpCode(HttpStatus.CREATED)
   async assign(@Body() dto: AssignStaffDto, @CurrentUser() actor: AuthenticatedUser) {
@@ -38,16 +67,21 @@ export class StaffAssignmentController {
       throw new BadRequestException('endsAt_must_be_after_startsAt');
     }
 
-    const [staff, workshop, room] = await Promise.all([
+    const [staff, workshop] = await Promise.all([
       this.prisma.user.findUnique({
         where: { id: dto.staffId },
         include: { roles: { include: { role: true } } },
       }),
       this.prisma.workshop.findUnique({ where: { id: dto.workshopId } }),
-      this.prisma.room.findUnique({ where: { id: dto.roomId } }),
     ]);
     if (!staff) throw new NotFoundException('staff_not_found');
     if (!workshop) throw new NotFoundException('workshop_not_found');
+    const fallbackRoom = dto.roomId || workshop.roomId
+      ? null
+      : await this.prisma.room.findFirst({ orderBy: { code: 'asc' } });
+    const effectiveRoomId = dto.roomId ?? workshop.roomId ?? fallbackRoom?.id;
+    if (!effectiveRoomId) throw new BadRequestException('room_required');
+    const room = await this.prisma.room.findUnique({ where: { id: effectiveRoomId } });
     if (!room) throw new NotFoundException('room_not_found');
     const hasRole = staff.roles.some((r) => r.role.name === 'CHECKIN_STAFF');
     if (!hasRole) {
@@ -56,11 +90,11 @@ export class StaffAssignmentController {
 
     const result = await this.prisma.staffRoomAssignment.upsert({
       where: { staffId_workshopId: { staffId: dto.staffId, workshopId: dto.workshopId } },
-      update: { roomId: dto.roomId, startsAt, endsAt },
+      update: { roomId: effectiveRoomId, startsAt, endsAt },
       create: {
         staffId: dto.staffId,
         workshopId: dto.workshopId,
-        roomId: dto.roomId,
+        roomId: effectiveRoomId,
         startsAt,
         endsAt,
       },
@@ -71,7 +105,7 @@ export class StaffAssignmentController {
       action: 'staff_assignment_upsert',
       resource: 'staff_room_assignment',
       resourceId: `${dto.staffId}:${dto.workshopId}`,
-      metadata: { roomId: dto.roomId, startsAt, endsAt },
+      metadata: { roomId: effectiveRoomId, startsAt, endsAt },
     });
 
     return result;

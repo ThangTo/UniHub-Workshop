@@ -1,4 +1,4 @@
-import { IsISO8601, IsUUID } from 'class-validator';
+import { IsISO8601, IsOptional, IsUUID } from 'class-validator';
 
 export class AssignStaffDto {
   @IsUUID()
@@ -8,7 +8,8 @@ export class AssignStaffDto {
   workshopId!: string;
 
   @IsUUID()
-  roomId!: string;
+  @IsOptional()
+  roomId?: string;
 
   @IsISO8601()
   startsAt!: string;

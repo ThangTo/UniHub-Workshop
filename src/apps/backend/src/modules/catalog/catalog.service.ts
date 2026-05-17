@@ -131,6 +131,21 @@ export class CatalogService {
     return this.toWorkshopResponse(w);
   }
 
+  async adminOptions() {
+    const [speakers, rooms] = await Promise.all([
+      this.prisma.speaker.findMany({
+        select: { id: true, name: true, title: true },
+        orderBy: { name: 'asc' },
+      }),
+      this.prisma.room.findMany({
+        select: { id: true, code: true, name: true, capacity: true, mapUrl: true },
+        orderBy: { code: 'asc' },
+      }),
+    ]);
+
+    return { speakers, rooms };
+  }
+
   // ==================== ORGANIZER CRUD ====================
   async create(dto: CreateWorkshopDto, createdBy: string) {
     const startAt = new Date(dto.startAt);
@@ -354,6 +369,81 @@ export class CatalogService {
       metadata: { reason, previousStatus: w.status },
     });
     return updated;
+  }
+
+  async deletePermanent(id: string, user: AuthenticatedUser) {
+    const w = await this.prisma.workshop.findUnique({ where: { id } });
+    if (!w) throw new NotFoundException('workshop_not_found');
+    this.assertCanManageWorkshop(w, user);
+
+    const result = await this.prisma.$transaction(async (tx) => {
+      const registrations = await tx.registration.findMany({
+        where: { workshopId: id },
+        select: { id: true },
+      });
+      const registrationIds = registrations.map((registration) => registration.id);
+
+      let deletedRefunds = 0;
+      let deletedPayments = 0;
+      let deletedCheckins = 0;
+      let deletedRegistrations = 0;
+
+      if (registrationIds.length > 0) {
+        const payments = await tx.payment.findMany({
+          where: { registrationId: { in: registrationIds } },
+          select: { id: true },
+        });
+        const paymentIds = payments.map((payment) => payment.id);
+
+        if (paymentIds.length > 0) {
+          deletedRefunds = (
+            await tx.paymentRefund.deleteMany({ where: { paymentId: { in: paymentIds } } })
+          ).count;
+        }
+
+        deletedPayments = (
+          await tx.payment.deleteMany({ where: { registrationId: { in: registrationIds } } })
+        ).count;
+        deletedCheckins = (
+          await tx.checkin.deleteMany({ where: { registrationId: { in: registrationIds } } })
+        ).count;
+        deletedRegistrations = (
+          await tx.registration.deleteMany({ where: { id: { in: registrationIds } } })
+        ).count;
+      }
+
+      const deletedAssignments = (
+        await tx.staffRoomAssignment.deleteMany({ where: { workshopId: id } })
+      ).count;
+      await tx.workshop.delete({ where: { id } });
+
+      await this.outbox.append(tx, {
+        aggregate: 'workshop',
+        aggregateId: id,
+        eventType: 'workshop.deleted_permanent',
+        payload: { workshopId: id, title: w.title },
+      });
+
+      return {
+        deletedAssignments,
+        deletedRegistrations,
+        deletedCheckins,
+        deletedPayments,
+        deletedRefunds,
+      };
+    });
+
+    await this.redis.getClient().del(`seat:${id}`).catch(() => {});
+    await this.invalidateCache();
+    await this.audit.log({
+      actorId: user.id,
+      action: 'workshop_deleted_permanent',
+      resource: 'workshop',
+      resourceId: id,
+      metadata: { title: w.title, status: w.status, ...result },
+    });
+
+    return { deleted: true, workshopId: id, ...result };
   }
 
   async markEndedWorkshops(now = new Date()): Promise<number> {
