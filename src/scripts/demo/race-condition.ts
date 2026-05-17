@@ -17,6 +17,9 @@ interface RegistrationResponse {
   registrationId?: string;
   status?: string;
   paymentRequired?: boolean;
+  processingId?: string;
+  pollUrl?: string;
+  retryAfterSec?: number;
   code?: string;
   message?: string;
 }
@@ -28,6 +31,18 @@ function parseArgs(): { clients: number } {
     throw new Error('--clients must be an integer from 2 to 1000');
   }
   return { clients };
+}
+
+function isRegistrationWinner(body: RegistrationResponse): boolean {
+  const registrationId = body.regId ?? body.registrationId;
+  return Boolean(
+    registrationId &&
+      (body.status === 'CONFIRMED' || body.status === 'PENDING_PAYMENT'),
+  );
+}
+
+function isQueuedRegistration(body: RegistrationResponse): boolean {
+  return body.status === 'QUEUED' && Boolean(body.processingId ?? body.pollUrl);
 }
 
 async function main(): Promise<void> {
@@ -78,7 +93,15 @@ async function main(): Promise<void> {
       }),
     );
 
-    const winners = results.filter((r) => r.status >= 200 && r.status < 300);
+    const winners = results.filter((r) => r.status >= 200 && r.status < 300 && isRegistrationWinner(r.body));
+    const queued = results.filter((r) => r.status === 202 && isQueuedRegistration(r.body));
+    const unexpected2xx = results.filter(
+      (r) =>
+        r.status >= 200 &&
+        r.status < 300 &&
+        !isRegistrationWinner(r.body) &&
+        !isQueuedRegistration(r.body),
+    );
     const conflicts = results.filter((r) => r.status === 409);
     const rateLimited = results.filter((r) => r.status === 429);
     const otherErrors = results.filter((r) => r.status >= 400 && r.status !== 409 && r.status !== 429);
@@ -95,11 +118,15 @@ async function main(): Promise<void> {
     ).seatsLeft;
 
     console.log(`[race] durationMs=${Date.now() - startedAt}`);
-    console.log(`[race] http winners=${winners.length} conflicts=${conflicts.length} rateLimited=${rateLimited.length} otherErrors=${otherErrors.length}`);
+    console.log(
+      `[race] http winners=${winners.length} queued=${queued.length} conflicts=${conflicts.length} rateLimited=${rateLimited.length} otherErrors=${otherErrors.length}`,
+    );
     console.log(`[race] dbActive=${dbActive} seatsLeft=${seatsLeft}`);
 
-    if (winners.length !== 1 || dbActive !== 1) {
-      console.error('[race] FAIL: expected exactly one successful active registration.');
+    if (winners.length !== 1 || dbActive !== 1 || seatsLeft !== 0 || unexpected2xx.length > 0) {
+      console.error(
+        '[race] FAIL: expected exactly one successful active registration. 202 QUEUED responses are allowed and are not seat winners.',
+      );
       console.error(JSON.stringify(results.slice(0, 20), null, 2));
       process.exitCode = 1;
       return;

@@ -18,6 +18,56 @@ cd <repo>\src
 
 Neu can kich ban quay video theo de bai, xem `docs/VIDEO_DEMO_SCRIPT.md`.
 
+## 0. Copy-Paste Nhanh Cho Video Local
+
+Dung block nay khi ban chay backend/frontend tren may rieng, con Docker chi
+chay PostgreSQL, Redis, RabbitMQ, MinIO, Mailhog va mock payment gateway.
+
+Truoc khi paste block ben duoi, restart backend local mot lan de backend doc
+lai `src/apps/backend/.env` moi. Neu backend dang chay bang `pnpm dev:backend`,
+nhan `Ctrl+C`, sau do chay lai `pnpm dev:backend`.
+
+```powershell
+# Chay trong PowerShell tai repo\src
+cd "D:\University\Semester 8\Class - Software design\Labs\UniHub-Workshop\src"
+
+# Docker chi chay ha tang va mock payment gateway, khong chay backend Docker.
+docker compose up -d postgres redis rabbitmq minio mailhog
+docker compose --profile mocks up -d mock-pg
+
+# Backend local doc apps/backend/.env; CSV script phai ghi vao cung data root.
+$env:API_BASE_URL = "http://localhost:3000"
+$env:UNIHUB_CSV_DATA_ROOT = "apps/backend/data"
+
+# Health check de quay man hinh truoc khi test.
+Invoke-RestMethod "$env:API_BASE_URL/health" | ConvertTo-Json -Depth 6
+Invoke-RestMethod "http://localhost:4000/health" | ConvertTo-Json -Depth 6
+
+# 1) Legacy CSV sync: SUCCESS, duplicate skip, bad header FAILED, partial PARTIAL.
+powershell -ExecutionPolicy Bypass -File scripts/smoke-csv-sync.ps1
+
+# 2) Race condition: 100 client tranh 1 ghe, ket qua winners=1 va dbActive=1.
+pnpm demo:race -- --clients=100
+
+# 3) Payment idempotency: 5 lan POST /payments cung Idempotency-Key, DB chi 1 row.
+pnpm demo:idempotency -- --attempts=5
+```
+
+Expected de quay video:
+
+- CSV co dong `All Phase 5 smoke tests passed.`
+- Race co dong `PASS: concurrent registration did not oversell the final seat.`
+- Idempotency co dong `PASS: repeated POST /payments with one key produced one durable payment record.`
+
+Neu gap loi nhanh:
+
+- `invalid_signature`: backend chua restart sau khi sua `JWT_PRIVATE_KEY/JWT_PUBLIC_KEY`.
+- CSV timeout: `CSV_DROP_DIR` cua backend va `UNIHUB_CSV_DATA_ROOT` cua script
+  dang tro toi 2 thu muc khac nhau.
+- Payment `payment_unavailable` hoac `ENOTFOUND mock-pg`: backend local chua
+  doc `MOCK_PG_URL=http://localhost:4000`; restart backend va kiem tra
+  `http://localhost:4000/health`.
+
 ## 1. Kiem Tra Build, Lint, Unit Test
 
 Chay truoc khi quay demo hoac nop source:
@@ -47,6 +97,9 @@ pnpm --filter ./apps/backend test
 ```
 
 ## 2. Start Stack Va Seed Data
+
+Phan nay danh cho Docker full stack. Neu dang demo theo cach backend/frontend
+local va infra Docker, dung block o muc 0.
 
 Docker full stack khong bat buoc co `.env`, vi `docker-compose.yml` da co default
 dev values. Tuy nhien AI summary dung Gemini API that, nen neu can test AI bang
@@ -150,8 +203,17 @@ powershell -ExecutionPolicy Bypass -File scripts/smoke-csv-sync.ps1
 ```
 
 Script mac dinh ghi file vao `src/data/csv-*`, khop voi volume mount cua backend
-Docker. Neu chay backend local bang `pnpm dev:backend`, backend dung
-`apps/backend/data/csv-*`; khi do set:
+Docker. Neu chay backend local bang `pnpm dev:backend`, backend nen doc
+`apps/backend/data/csv-*`; `src/apps/backend/.env` can co:
+
+```env
+CSV_DROP_DIR=./data/csv-drop
+CSV_QUARANTINE_DIR=./data/csv-quarantine
+CSV_ARCHIVE_DIR=./data/csv-archive
+```
+
+Sau do restart backend local. Script cung can ghi file vao dung data root. Day
+la lenh nen quay khi backend/frontend chay local:
 
 ```powershell
 $env:UNIHUB_CSV_DATA_ROOT = "apps/backend/data"
@@ -170,24 +232,13 @@ Expected:
 Muc tieu: chung minh seat allocation atomic, khong oversell.
 
 Demo script tao token truc tiep bang private key, vi vay backend va script phai
-dung cung `JWT_PRIVATE_KEY/JWT_PUBLIC_KEY`. Nen set stable JWT key trong
-`src/.env` hoac `src/apps/backend/.env` truoc khi start backend.
-
-Tao RSA key pair de paste vao env:
-
-```powershell
-node -e "const {generateKeyPairSync}=require('crypto'); const {privateKey, publicKey}=generateKeyPairSync('rsa',{modulusLength:2048,publicKeyEncoding:{type:'spki',format:'pem'},privateKeyEncoding:{type:'pkcs8',format:'pem'}}); console.log('JWT_PRIVATE_KEY=' + JSON.stringify(privateKey)); console.log('JWT_PUBLIC_KEY=' + JSON.stringify(publicKey));"
-```
-
-Restart backend sau khi sua key:
-
-```powershell
-docker compose --profile all up -d --force-recreate backend
-```
+dung cung `JWT_PRIVATE_KEY/JWT_PUBLIC_KEY`. Neu backend chay local, key nam
+trong `src/apps/backend/.env`; restart backend local sau khi sua `.env`.
 
 Chay 100 clients:
 
 ```powershell
+$env:API_BASE_URL = "http://localhost:3000"
 pnpm demo:race -- --clients=100
 ```
 
@@ -218,10 +269,12 @@ Preconditions:
 - Backend running.
 - `mock-pg` running.
 - Stable JWT key nhu muc race condition.
+- Backend local doc `MOCK_PG_URL=http://localhost:4000`.
 
 Chay:
 
 ```powershell
+$env:API_BASE_URL = "http://localhost:3000"
 pnpm demo:idempotency -- --attempts=5
 ```
 

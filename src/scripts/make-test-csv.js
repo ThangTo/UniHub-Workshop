@@ -60,5 +60,5 @@ for (let i = 0; i < rows; i++) {
 }
 
 fs.writeFileSync(outPath, lines.join('\n') + '\n', 'utf8');
-console.log(`Wrote ${rows} rows → ${outPath}`);
+console.log(`Wrote ${rows} rows -> ${outPath}`);
 console.log(`Header valid: ${!badHeader}; partial errors: ${partial}`);
