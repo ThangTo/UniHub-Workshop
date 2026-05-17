@@ -23,7 +23,7 @@ export default function App() {
         <Route path="/workshops" element={<WorkshopsAdminScreen />} />
         <Route path="/workshops/new" element={<WorkshopFormScreen mode="create" />} />
         <Route path="/workshops/:id" element={<WorkshopDetailAdminScreen />} />
-        <Route path="/workshops/:id/edit" element={<WorkshopFormScreen mode="edit" />} />
+        <Route path="/workshops/:id/edit" element={<WorkshopDetailAdminScreen />} />
         <Route path="/registrations" element={<RegistrationsScreen />} />
         <Route path="/staff-assignments" element={<StaffAssignmentsScreen />} />
         <Route

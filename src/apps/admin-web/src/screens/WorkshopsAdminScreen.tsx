@@ -85,8 +85,8 @@ export function WorkshopsAdminScreen() {
                     <SummaryBadge status={w.summaryStatus} />
                   </td>
                   <td>
-                    <Link to={`/workshops/${w.id}/edit`} className="btn-ghost text-xs">
-                      Chỉnh sửa
+                    <Link to={`/workshops/${w.id}`} className="btn-ghost text-xs">
+                      Quản lý
                     </Link>
                   </td>
                 </tr>

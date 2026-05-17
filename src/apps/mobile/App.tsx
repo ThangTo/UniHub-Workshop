@@ -10,6 +10,9 @@ import {
   ActivityIndicator,
   Alert,
   FlatList,
+  InputAccessoryView,
+  Keyboard,
+  Platform,
   Pressable,
   SafeAreaView,
   StyleSheet,
@@ -80,6 +83,25 @@ type BatchResponse = {
   invalid?: BatchItemResult[];
 };
 
+type QrValidationErrorCode =
+  | 'missing_key'
+  | 'malformed'
+  | 'unexpected_alg'
+  | 'missing_fields'
+  | 'invalid_signature_or_expired'
+  | 'not_yet_valid'
+  | 'expired';
+
+class QrValidationError extends Error {
+  constructor(
+    public readonly code: QrValidationErrorCode,
+    message: string,
+  ) {
+    super(message);
+    this.name = 'QrValidationError';
+  }
+}
+
 const { KJUR } = jsrsasign;
 
 const DEFAULT_API_BASE_URL = 'http://localhost:3000';
@@ -88,6 +110,7 @@ const API_BASE_STORAGE_KEY = 'unihub.mobile.apiBaseUrl';
 const DEVICE_ID_STORAGE_KEY = 'unihub.mobile.deviceId';
 const JWKS_STORAGE_KEY = 'unihub.mobile.jwks';
 const POST_END_GRACE_MS = 60 * 60 * 1000;
+const QR_TOKEN_INPUT_ACCESSORY_ID = 'qr-token-input-accessory';
 
 const db = SQLite.openDatabaseSync('unihub-checkin.db');
 
@@ -104,8 +127,11 @@ export default function App() {
   const [scannerOpen, setScannerOpen] = useState(false);
   const [isOnline, setIsOnline] = useState<boolean | null>(null);
   const [lastSyncMessage, setLastSyncMessage] = useState('No sync yet');
+  const [lastQrError, setLastQrError] = useState<string | null>(null);
   const [permission, requestPermission] = useCameraPermissions();
   const syncingRef = useRef(false);
+  const scanInFlightRef = useRef(false);
+  const lastCameraTokenRef = useRef<{ token: string; at: number } | null>(null);
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const pendingCount = useMemo(
@@ -287,85 +313,142 @@ export default function App() {
     setAuth(null);
   }
 
-  async function queueScan(tokenInput = qrToken) {
+  async function queueScan(tokenInput = qrToken, source: 'manual' | 'camera' = 'manual') {
     const token = tokenInput.trim();
     if (!token) return;
 
-    let payload: QrPayload;
+    if (source === 'camera') {
+      const now = Date.now();
+      const last = lastCameraTokenRef.current;
+      if (scanInFlightRef.current || (last?.token === token && now - last.at < 3000)) {
+        return;
+      }
+      scanInFlightRef.current = true;
+      lastCameraTokenRef.current = { token, at: now };
+    }
+
     try {
-      payload = verifyQrOffline(token);
-    } catch (error) {
-      Alert.alert('Invalid QR', (error as Error).message);
-      return;
-    }
+      const payload = await verifyQrWithOptionalKeyRefresh(token);
 
-    if (auth && isOnline) {
-      const canQueue = await verifyOnlineBeforeQueue(payload);
-      if (!canQueue) return;
-    }
+      if (auth && isOnline) {
+        const canQueue = await verifyOnlineBeforeQueue(payload);
+        if (!canQueue) return;
+      }
 
-    const scannedAt = new Date().toISOString();
-    const scannedMs = new Date(scannedAt).getTime();
-    const idempotencyKey = await Crypto.digestStringAsync(
-      Crypto.CryptoDigestAlgorithm.SHA256,
-      `${payload.regId}${deviceId}${scannedMs}`,
-    );
-
-    await db.runAsync(
-      `INSERT OR IGNORE INTO pending_scans
-       (idempotency_key, qr_token, reg_id, workshop_id, scanned_at, device_id, synced, result_code)
-       VALUES (?, ?, ?, ?, ?, ?, 0, NULL)`,
-      [idempotencyKey, token, payload.regId, payload.workshopId, scannedAt, deviceId],
-    );
-    setQrToken('');
-    setScannerOpen(false);
-    await reloadPending();
-    const queueMessage = `Queued ${payload.regId.slice(0, 8)} at ${new Date(scannedAt).toLocaleTimeString()}`;
-    setLastSyncMessage(queueMessage);
-    if (isOnline === false) {
-      Alert.alert(
-        'Offline scan queued',
-        'QR signature is valid and the scan is saved locally. Room assignment will be checked when sync runs.',
+      const scannedAt = new Date().toISOString();
+      const scannedMs = new Date(scannedAt).getTime();
+      const idempotencyKey = await Crypto.digestStringAsync(
+        Crypto.CryptoDigestAlgorithm.SHA256,
+        `${payload.regId}${deviceId}${scannedMs}`,
       );
-    }
 
-    if (auth && isOnline) {
-      void syncPending(true);
+      await db.runAsync(
+        `INSERT OR IGNORE INTO pending_scans
+         (idempotency_key, qr_token, reg_id, workshop_id, scanned_at, device_id, synced, result_code)
+         VALUES (?, ?, ?, ?, ?, ?, 0, NULL)`,
+        [idempotencyKey, token, payload.regId, payload.workshopId, scannedAt, deviceId],
+      );
+      setQrToken('');
+      setScannerOpen(false);
+      setLastQrError(null);
+      await reloadPending();
+      const queueMessage = `Queued ${payload.regId.slice(0, 8)} at ${new Date(scannedAt).toLocaleTimeString()}`;
+      setLastSyncMessage(queueMessage);
+      if (isOnline === false) {
+        Alert.alert(
+          'Offline scan queued',
+          'QR signature is valid and the scan is saved locally. Room assignment will be checked when sync runs.',
+        );
+      }
+
+      if (auth && isOnline) {
+        void syncPending(true);
+      }
+    } catch (error) {
+      const detail = describeQrError(error);
+      setLastQrError(`${detail.title}: ${detail.message}`);
+      if (source === 'camera') setScannerOpen(false);
+      Alert.alert(detail.title, detail.message);
+      return;
+    } finally {
+      if (source === 'camera') {
+        setTimeout(() => {
+          scanInFlightRef.current = false;
+        }, 1200);
+      }
     }
   }
 
-  function verifyQrOffline(token: string): QrPayload {
-    if (!jwks) {
-      throw new Error('No cached public key. Login online once before offline check-in.');
+  async function verifyQrWithOptionalKeyRefresh(token: string): Promise<QrPayload> {
+    try {
+      return verifyQrOffline(token);
+    } catch (error) {
+      if (
+        error instanceof QrValidationError &&
+        error.code === 'invalid_signature_or_expired' &&
+        auth &&
+        isOnline
+      ) {
+        const nextJwks = await fetchJwks();
+        setJwks(nextJwks);
+        setLastSyncMessage('Public key refreshed after QR signature mismatch.');
+        return verifyQrOffline(token, nextJwks);
+      }
+      throw error;
+    }
+  }
+
+  function verifyQrOffline(token: string, keySet = jwks): QrPayload {
+    if (!keySet) {
+      throw new QrValidationError(
+        'missing_key',
+        'No cached public key. Login online once, then scan again.',
+      );
     }
 
     let parsed: { headerObj?: { alg?: string }; payloadObj?: QrPayload };
     try {
       parsed = KJUR.jws.JWS.parse(token) as { headerObj?: { alg?: string }; payloadObj?: QrPayload };
     } catch {
-      throw new Error('Malformed QR token.');
+      throw new QrValidationError('malformed', 'This QR is not a UniHub check-in token.');
     }
 
     if (parsed.headerObj?.alg !== 'RS256') {
-      throw new Error('Unexpected QR algorithm.');
+      throw new QrValidationError(
+        'unexpected_alg',
+        `Unexpected QR algorithm: ${parsed.headerObj?.alg ?? 'missing'}.`,
+      );
     }
     const payload = parsed.payloadObj;
     if (!payload?.regId || !payload.workshopId || !payload.validFrom || !payload.validTo) {
-      throw new Error('QR token is missing required fields.');
+      throw new QrValidationError('missing_fields', 'QR token is missing registration or validity fields.');
     }
 
-    const ok = KJUR.jws.JWS.verifyJWT(token, jwks.publicKey, {
+    const ok = KJUR.jws.JWS.verifyJWT(token, keySet.publicKey, {
       alg: ['RS256'],
-      iss: [jwks.issuer],
+      iss: [keySet.issuer],
       verifyAt: Math.floor(Date.now() / 1000),
     });
     if (!ok) {
-      throw new Error('QR signature is invalid or token is expired.');
+      throw new QrValidationError(
+        'invalid_signature_or_expired',
+        'QR signature does not match the cached public key, or the JWT has expired. The app tried to refresh the key if online.',
+      );
     }
 
     const now = Date.now();
-    if (now < payload.validFrom * 1000) throw new Error('QR is not valid yet.');
-    if (now > payload.validTo * 1000 + POST_END_GRACE_MS) throw new Error('QR is expired.');
+    if (now < payload.validFrom * 1000) {
+      throw new QrValidationError(
+        'not_yet_valid',
+        `QR is not valid yet. It opens at ${formatQrTime(payload.validFrom)}.`,
+      );
+    }
+    if (now > payload.validTo * 1000 + POST_END_GRACE_MS) {
+      throw new QrValidationError(
+        'expired',
+        `QR is expired. It closed at ${formatQrTime((payload.validTo * 1000 + POST_END_GRACE_MS) / 1000)}.`,
+      );
+    }
     return payload;
   }
 
@@ -407,6 +490,9 @@ export default function App() {
         return;
       }
     }
+    scanInFlightRef.current = false;
+    lastCameraTokenRef.current = null;
+    setLastQrError(null);
     setScannerOpen(true);
   }
 
@@ -599,7 +685,7 @@ export default function App() {
                   style={styles.camera}
                   barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
                   onBarcodeScanned={({ data }) => {
-                    if (!busy && data) void queueScan(data);
+                    if (!busy && data) void queueScan(data, 'camera');
                   }}
                 />
                 <Pressable onPress={() => setScannerOpen(false)} style={styles.secondaryButton}>
@@ -612,10 +698,25 @@ export default function App() {
               onChangeText={setQrToken}
               style={[styles.input, styles.qrInput]}
               autoCapitalize="none"
+              autoCorrect={false}
+              blurOnSubmit
+              inputAccessoryViewID={Platform.OS === 'ios' ? QR_TOKEN_INPUT_ACCESSORY_ID : undefined}
               multiline
+              onSubmitEditing={() => Keyboard.dismiss()}
               placeholder="Paste QR token"
               placeholderTextColor="#94a3b8"
+              returnKeyType="done"
             />
+            {Platform.OS === 'ios' ? (
+              <InputAccessoryView nativeID={QR_TOKEN_INPUT_ACCESSORY_ID}>
+                <View style={styles.keyboardAccessory}>
+                  <Pressable onPress={() => Keyboard.dismiss()} style={styles.keyboardDoneButton}>
+                    <Text style={styles.keyboardDoneText}>Done</Text>
+                  </Pressable>
+                </View>
+              </InputAccessoryView>
+            ) : null}
+            {lastQrError ? <Text style={styles.errorText}>{lastQrError}</Text> : null}
             <View style={styles.row}>
               <ActionButton label="Scan QR" onPress={openScanner} disabled={busy} />
               <ActionButton label="Queue Token" onPress={() => queueScan()} disabled={busy || !qrToken.trim()} />
@@ -676,6 +777,34 @@ function confirmAsync(title: string, message: string, confirmLabel: string): Pro
   });
 }
 
+function describeQrError(error: unknown): { title: string; message: string } {
+  if (error instanceof QrValidationError) {
+    switch (error.code) {
+      case 'missing_key':
+        return { title: 'Public key not cached', message: error.message };
+      case 'malformed':
+        return { title: 'Not a UniHub QR', message: error.message };
+      case 'unexpected_alg':
+      case 'missing_fields':
+        return { title: 'Unsupported QR token', message: error.message };
+      case 'invalid_signature_or_expired':
+        return { title: 'QR signature mismatch', message: error.message };
+      case 'not_yet_valid':
+        return { title: 'QR not valid yet', message: error.message };
+      case 'expired':
+        return { title: 'QR expired', message: error.message };
+    }
+  }
+  return {
+    title: 'QR check failed',
+    message: error instanceof Error ? error.message : 'Unknown QR validation error.',
+  };
+}
+
+function formatQrTime(unixSeconds: number): string {
+  return new Date(unixSeconds * 1000).toLocaleString();
+}
+
 const styles = StyleSheet.create({
   page: { flex: 1, backgroundColor: '#f0f4f8', paddingHorizontal: 20, paddingTop: 12 },
   loginContainer: { flex: 1, justifyContent: 'center', paddingBottom: 36 },
@@ -716,6 +845,17 @@ const styles = StyleSheet.create({
     shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.02, shadowRadius: 4, elevation: 1
   },
   qrInput: { minHeight: 100, textAlignVertical: 'top' },
+  keyboardAccessory: {
+    minHeight: 44,
+    alignItems: 'flex-end',
+    justifyContent: 'center',
+    backgroundColor: '#f8fafc',
+    borderTopColor: '#cbd5e1',
+    borderTopWidth: 1,
+    paddingHorizontal: 12,
+  },
+  keyboardDoneButton: { paddingHorizontal: 12, paddingVertical: 8 },
+  keyboardDoneText: { color: '#0f766e', fontSize: 16, fontWeight: '800' },
   cameraFrame: { borderRadius: 16, overflow: 'hidden', backgroundColor: '#0f172a', borderWidth: 1, borderColor: '#e2e8f0' },
   camera: { height: 300 },
   row: { flexDirection: 'row', gap: 12 },

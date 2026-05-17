@@ -1,7 +1,7 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api, apiError } from '../lib/api';
-import type { CreateWorkshopInput, WorkshopSummary } from '../lib/types';
+import type { CreateWorkshopInput, RoomOption, SpeakerOption, WorkshopFormOptions, WorkshopSummary } from '../lib/types';
 import { fromLocalInput, toLocalInput } from '../lib/format';
 
 export function WorkshopFormScreen({ mode }: { mode: 'create' | 'edit' }) {
@@ -18,9 +18,12 @@ export function WorkshopFormScreen({ mode }: { mode: 'create' | 'edit' }) {
     roomId: null,
   });
   const [version, setVersion] = useState<number | null>(null);
+  const [speakerOptions, setSpeakerOptions] = useState<SpeakerOption[]>([]);
+  const [roomOptions, setRoomOptions] = useState<RoomOption[]>([]);
   const [loading, setLoading] = useState(mode === 'edit');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [optionsError, setOptionsError] = useState<string | null>(null);
 
   useEffect(() => {
     if (mode !== 'edit' || !id) return;
@@ -47,6 +50,22 @@ export function WorkshopFormScreen({ mode }: { mode: 'create' | 'edit' }) {
       cancelled = true;
     };
   }, [id, mode]);
+
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .get<WorkshopFormOptions>('/workshop-form-options')
+      .then((r) => {
+        if (cancelled) return;
+        setSpeakerOptions(r.data.speakers);
+        setRoomOptions(r.data.rooms);
+        setOptionsError(null);
+      })
+      .catch((e) => !cancelled && setOptionsError(apiError(e, 'Không tải được danh sách speaker/phòng.')));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   function update<K extends keyof CreateWorkshopInput>(key: K, val: CreateWorkshopInput[K]) {
     setForm((f) => ({ ...f, [key]: val }));
@@ -160,26 +179,44 @@ export function WorkshopFormScreen({ mode }: { mode: 'create' | 'edit' }) {
           </div>
           <div className="grid gap-4 sm:grid-cols-2">
             <div>
-              <label className="label">Speaker ID</label>
-              <input
+              <label className="label">Diễn giả</label>
+              <select
                 className="input"
-                placeholder="(uuid, optional)"
                 value={form.speakerId ?? ''}
                 onChange={(e) => update('speakerId', e.target.value || null)}
-              />
+              >
+                <option value="">Chưa chọn diễn giả</option>
+                {speakerOptions.map((speaker) => (
+                  <option key={speaker.id} value={speaker.id}>
+                    {speaker.name}
+                    {speaker.title ? ` - ${speaker.title}` : ''}
+                  </option>
+                ))}
+              </select>
             </div>
             <div>
-              <label className="label">Room ID</label>
-              <input
+              <label className="label">Phòng</label>
+              <select
                 className="input"
-                placeholder="(uuid, optional)"
                 value={form.roomId ?? ''}
                 onChange={(e) => update('roomId', e.target.value || null)}
-              />
+              >
+                <option value="">Chưa chọn phòng</option>
+                {roomOptions.map((room) => (
+                  <option key={room.id} value={room.id}>
+                    {room.code} - {room.name} ({room.capacity} chỗ)
+                  </option>
+                ))}
+              </select>
             </div>
           </div>
           {error && (
             <div className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>
+          )}
+          {optionsError && (
+            <div className="rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-700">
+              {optionsError}
+            </div>
           )}
           <div className="flex items-center justify-end gap-3 border-t border-slate-200 pt-4">
             <Link to="/workshops" className="btn-outline">
