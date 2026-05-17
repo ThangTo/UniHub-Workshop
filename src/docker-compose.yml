@@ -132,7 +132,9 @@ services:
       SMTP_FROM: ${SMTP_FROM:-UniHub <no-reply@unihub.local>}
       MOCK_PG_URL: http://mock-pg:4000
       MOCK_PG_WEBHOOK_SECRET: ${MOCK_PG_WEBHOOK_SECRET:-mock-pg-secret}
-      MOCK_AI_URL: http://mock-ai:4100
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
+      GEMINI_API_BASE_URL: ${GEMINI_API_BASE_URL:-https://generativelanguage.googleapis.com/v1beta}
       PAYMENT_TIMEOUT_MS: ${PAYMENT_TIMEOUT_MS:-3000}
       PAYMENT_CB_ERROR_THRESHOLD: ${PAYMENT_CB_ERROR_THRESHOLD:-50}
       PAYMENT_CB_RESET_MS: ${PAYMENT_CB_RESET_MS:-30000}
@@ -174,7 +176,7 @@ services:
       - '4000:4000'
 
   mock-ai:
-    profiles: ['app', 'mocks', 'all']
+    profiles: ['mocks']
     build:
       context: .
       dockerfile: services/mock-ai/Dockerfile
